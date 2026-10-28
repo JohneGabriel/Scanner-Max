@@ -112,6 +112,10 @@ object ObdManager {
     private val _recording = MutableStateFlow<File?>(null)
     val recording: StateFlow<File?> = _recording.asStateFlow()
 
+    /** Quando a gravação atual começou (para o cronômetro da notificação). */
+    var recordingStartedAt = 0L
+        private set
+
     private val _trips = MutableStateFlow<List<File>>(emptyList())
     val trips: StateFlow<List<File>> = _trips.asStateFlow()
 
@@ -518,6 +522,7 @@ object ObdManager {
         val cols = listOf("rpm", "speed", "coolant", "load", "throttle", "iat", "map", "advance",
             "stft", "ltft", "o2s1", "o2s2", "battery")
         file.writeText("hora," + cols.joinToString(",") + "\n")
+        recordingStartedAt = System.currentTimeMillis()
         _recording.value = file
         if (_liveMode.value == LiveMode.OFF) setLive(LiveMode.DASHBOARD)
         recordJob = scope.launch {
