@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BluetoothConnected
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.LocalGasStation
+import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.AlertDialog
@@ -56,6 +57,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import br.obd.app.LiveMode
@@ -81,6 +83,7 @@ private val tabs = listOf(
     Tab("Painel", Icons.Filled.Speed),
     Tab("Combustível", Icons.Filled.LocalGasStation),
     Tab("Diagnóstico", Icons.Filled.Warning),
+    Tab("VW", Icons.Filled.Usb),
     Tab("Ferramentas", Icons.Filled.Build),
 )
 
@@ -167,7 +170,8 @@ private fun AppRoot() {
                 tabs.forEachIndexed { i, t ->
                     NavigationBarItem(
                         selected = tab == i, onClick = { tab = i },
-                        icon = { Icon(t.icon, null) }, label = { Text(t.label) },
+                        icon = { Icon(t.icon, null) },
+                        label = { Text(t.label, maxLines = 1, fontSize = 11.sp) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = Accent,
                             selectedTextColor = Accent,
@@ -185,6 +189,7 @@ private fun AppRoot() {
                 0 -> DashboardScreen(onConnect)
                 1 -> FuelScreen(onConnect)
                 2 -> DiagnosticsScreen(onConnect)
+                3 -> VagScreen()
                 else -> ToolsScreen(onShare)
             }
         }
