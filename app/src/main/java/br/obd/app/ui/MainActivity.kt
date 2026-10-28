@@ -269,12 +269,38 @@ private fun AppRoot() {
         if (nav.top?.route != "test") nav.go("test", id)
     }
 
-    BackHandler(enabled = drawer.isOpen || nav.stack.isNotEmpty() || nav.tab != 0) {
+    var confirmExit by remember { mutableStateOf(false) }
+    BackHandler(enabled = !splash && prefs.onboarded) {
         when {
             drawer.isOpen -> scope.launch { drawer.close() }
             nav.back() -> Unit
-            else -> nav.tab = 0
+            nav.tab != 0 -> nav.tab = 0
+            else -> { confirmExit = true; br.obd.app.Feedback.tick() }
         }
+    }
+    if (confirmExit) {
+        val activity = context as? android.app.Activity
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmExit = false },
+            icon = { LogoMark(40) },
+            title = { Text("Sair do Scanner Max?") },
+            text = {
+                Text(if (connected) "O carro está conectado. Você pode sair e manter a conexão em segundo plano " +
+                    "(viagem, alertas e notificação continuam) ou desconectar antes de sair."
+                else "Até a próxima!")
+            },
+            confirmButton = {
+                Column(horizontalAlignment = Alignment.End) {
+                    androidx.compose.material3.TextButton(onClick = { confirmExit = false; activity?.finish() }) {
+                        BtnLabel(if (connected) "Sair e manter conectado" else "Sair")
+                    }
+                    if (connected) androidx.compose.material3.TextButton(onClick = {
+                        confirmExit = false; ObdManager.disconnect(); activity?.finish()
+                    }) { BtnLabel("Desconectar e sair") }
+                }
+            },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmExit = false }) { BtnLabel("Ficar") } },
+        )
     }
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
