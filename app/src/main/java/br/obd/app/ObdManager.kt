@@ -311,7 +311,19 @@ object ObdManager {
     private suspend fun readInto(def: PidDef): Double? {
         val v = elm.readPid(def.pid)?.let(def.decode) ?: return null
         _values.update { it + (def.key to v) }
+        if (def == Pids.LTFT) trackLtft(v)
         return v
+    }
+
+    private val ltftRecent = ArrayDeque<Double>()
+    private val _ltftStuck = MutableStateFlow(false)
+    /** true quando as últimas leituras da correção longa são todas idênticas (aprendizado parado). */
+    val ltftStuck: StateFlow<Boolean> = _ltftStuck.asStateFlow()
+
+    private fun trackLtft(v: Double) {
+        ltftRecent.addLast(v)
+        while (ltftRecent.size > 20) ltftRecent.removeFirst()
+        _ltftStuck.value = ltftRecent.size >= 15 && ltftRecent.all { it == ltftRecent.first() } && kotlin.math.abs(v) >= 5
     }
 
     private suspend fun readBattery() {

@@ -14,6 +14,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -36,6 +37,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -135,10 +137,15 @@ private fun AppRoot() {
             Column {
                 TopAppBar(
                     title = {
-                        Column {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text("Scanner-Max", style = MaterialTheme.typography.titleLarge)
-                            Text(busy ?: status, style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                            val pillColor = when {
+                                busy != null -> Accent
+                                connected && status == "Conectado" -> Good
+                                connected -> Warn
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                            StatusPill(busy ?: status, pillColor)
                         }
                     },
                     actions = {
@@ -161,6 +168,11 @@ private fun AppRoot() {
                     NavigationBarItem(
                         selected = tab == i, onClick = { tab = i },
                         icon = { Icon(t.icon, null) }, label = { Text(t.label) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = Accent,
+                            selectedTextColor = Accent,
+                            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                        ),
                     )
                 }
             }
