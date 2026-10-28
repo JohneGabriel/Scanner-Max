@@ -43,6 +43,7 @@ class VagSession(
     var init: VagInit? = null
         private set
     private var counter = 0
+    private var identKw1281: List<String> = emptyList()
     private var lastMsg = 0L
 
     /** Registro detalhado dos bytes (útil para depurar o primeiro contato). */
@@ -110,21 +111,24 @@ class VagSession(
                 throw KLineException("KWP2000: esperado complemento do endereço, veio ${hex(ack)}")
             }
             Thread.sleep(60)
-        } else {
-            counter = 0
         }
         lastMsg = System.currentTimeMillis()
-        return VagInit(address, baud, kw1, kw2, protocol)
+        val result = VagInit(address, baud, kw1, kw2, protocol)
+        if (protocol == VagProtocol.KW1281) {
+            // a central começa a mandar a identificação na hora e espera cada byte ser
+            // confirmado em poucos ms: a leitura tem de acontecer aqui, sem pausa
+            counter = 0
+            init = result
+            identKw1281 = receiveUntilAck().filter { it.title == T_ASCII }.map { ascii(it.data) }
+        }
+        return result
     }
 
     // ================================================================== funções de alto nível
 
     /** Identificação da central (número de peça, nome, codificação). */
     fun readIdent(): List<String> = when (proto()) {
-        VagProtocol.KW1281 -> {
-            // logo após a inicialização a central manda os blocos de identificação sozinha
-            receiveUntilAck().filter { it.title == T_ASCII }.map { ascii(it.data) }
-        }
+        VagProtocol.KW1281 -> identKw1281 // lida durante a inicialização
         VagProtocol.KWP2000 -> {
             kwpRequest(intArrayOf(0x10, 0x89)) // sessão de diagnóstico VW
             val r = kwpRequest(intArrayOf(0x1A, 0x9B))
