@@ -374,7 +374,7 @@ fun AboutScreen(app: AppActions) {
     ScreenColumn {
         Column(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             LogoMark(96)
-            Text("Scanner-Max", style = MaterialTheme.typography.headlineSmall)
+            Text("Scanner Max", style = MaterialTheme.typography.headlineSmall)
             Hint("Versão ${AppInfo.version}")
             Text("Diagnóstico OBD2 completo, gratuito e sem anúncios, para qualquer carro com tomada OBD2 (a partir de ~2010 no Brasil, e muitos antes).",
                 style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)

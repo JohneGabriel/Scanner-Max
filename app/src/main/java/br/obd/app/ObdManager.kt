@@ -886,7 +886,7 @@ object ObdManager {
         val dir = File(context.cacheDir, "logs").apply { mkdirs() }
         val file = File(dir, "obd-log-$stamp.txt")
         file.writeText(buildString {
-            appendLine("Scanner-Max — log exportado em $stamp")
+            appendLine("Scanner Max — log exportado em $stamp")
             appendLine("Adaptador: ${_adapterName.value ?: "—"}")
             appendLine("Status: ${_status.value}")
             _report.value?.let { appendLine(); appendLine(it) }

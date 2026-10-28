@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Ícone do Scanner-Max: mostrador de rotação com ponteiro, em laranja sobre fundo escuro.
+<!-- Ícone do Scanner Max: mostrador de rotação com ponteiro, em laranja sobre fundo escuro.
      Área segura do ícone adaptativo: círculo de 33 dp em volta do centro (54,54). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"

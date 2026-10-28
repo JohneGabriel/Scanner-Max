@@ -68,7 +68,7 @@ object Reports {
             p.style = Paint.Style.STROKE; p.strokeWidth = 4f; p.strokeCap = Paint.Cap.ROUND
             cv.drawArc(RectF(M, 20f, M + 34f, 54f), 135f, 270f, false, p)
             p.style = Paint.Style.FILL
-            text(cv, "Scanner-Max", M + 46f, 34f, 11f, Color.argb(200, 255, 255, 255), bold = true)
+            text(cv, "Scanner Max", M + 46f, 34f, 11f, Color.argb(200, 255, 255, 255), bold = true)
             text(cv, title, M + 46f, 54f, 18f, Color.WHITE, bold = true)
             text(cv, subtitle, W - M, 54f, 10f, Color.argb(200, 255, 255, 255), align = Paint.Align.RIGHT)
             y = 100f
@@ -78,7 +78,7 @@ object Reports {
             val cv = c ?: return
             val p = Paint(); p.color = LINE
             cv.drawLine(M, H - 40f, W - M, H - 40f, p)
-            text(cv, "Gerado pelo Scanner-Max em ${SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("pt", "BR")).format(Date())}",
+            text(cv, "Gerado pelo Scanner Max em ${SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("pt", "BR")).format(Date())}",
                 M, H - 26f, 8f, MUTED)
             text(cv, "Página $n", W - M, H - 26f, 8f, MUTED, align = Paint.Align.RIGHT)
         }

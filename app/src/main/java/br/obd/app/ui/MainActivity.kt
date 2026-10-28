@@ -275,7 +275,7 @@ private fun AppRoot() {
                             },
                             title = {
                                 Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                    Text(if (page != null) pageTitle(page) else "Scanner-Max", style = MaterialTheme.typography.titleLarge, maxLines = 1,
+                                    Text(if (page != null) pageTitle(page) else "Scanner Max", style = MaterialTheme.typography.titleLarge, maxLines = 1,
                                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                                     if (page == null) {
                                         val pillColor = when {
@@ -402,7 +402,7 @@ private fun DrawerContent(app: AppActions, go: (String) -> Unit) {
             LogoMark(46)
             Spacer(Modifier.width(12.dp))
             Column {
-                Text("Scanner-Max", style = MaterialTheme.typography.titleLarge)
+                Text("Scanner Max", style = MaterialTheme.typography.titleLarge)
                 Hint(veh?.name?.let { "$it · ${if (connected) "conectado" else "desconectado"}" } ?: "Nenhum carro ainda")
             }
         }
@@ -487,7 +487,7 @@ private fun Splash(onDone: () -> Unit) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.scale(scale.value)) {
             LogoMark(120, sweep.value)
             Spacer(Modifier.height(22.dp))
-            Text("Scanner-Max", fontSize = 30.sp, fontWeight = FontWeight.Bold, modifier = Modifier.alpha(textAlpha.value))
+            Text("Scanner Max", fontSize = 30.sp, fontWeight = FontWeight.Bold, modifier = Modifier.alpha(textAlpha.value))
             Spacer(Modifier.height(4.dp))
             Text("Diagnóstico OBD2 para qualquer carro", style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.alpha(textAlpha.value))

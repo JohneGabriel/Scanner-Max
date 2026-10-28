@@ -124,7 +124,7 @@ fun SetupScreen(onDone: (connect: Boolean) -> Unit) {
                         0 -> {
                             Spacer(Modifier.height(12.dp))
                             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { LogoMark(96) }
-                            Text("Bem-vindo ao Scanner-Max", style = MaterialTheme.typography.headlineSmall,
+                            Text("Bem-vindo ao Scanner Max", style = MaterialTheme.typography.headlineSmall,
                                 modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
                             Text("Em um minuto o app fica pronto para o seu carro. Dá para pular e ajustar depois no menu.",
                                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,

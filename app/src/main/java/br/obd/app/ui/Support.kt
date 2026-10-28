@@ -93,7 +93,7 @@ object HealthReport {
 
 object Legal {
     val TERMS = "Termos de uso" to listOf(
-        "Sobre o serviço" to "O Scanner-Max é um aplicativo de diagnóstico que lê informações da central eletrônica do seu veículo pela tomada OBD2, usando um adaptador compatível com ELM327 (ou o cabo KKL, para centrais VW). Ele é distribuído gratuitamente, como está, para uso pessoal.",
+        "Sobre o serviço" to "O Scanner Max é um aplicativo de diagnóstico que lê informações da central eletrônica do seu veículo pela tomada OBD2, usando um adaptador compatível com ELM327 (ou o cabo KKL, para centrais VW). Ele é distribuído gratuitamente, como está, para uso pessoal.",
         "Natureza das informações" to "As leituras, explicações de códigos, veredictos dos testes, estimativas de consumo e relatórios são orientativos. Eles podem conter imprecisões causadas pelo adaptador, pela central do veículo ou pelos limites do próprio padrão OBD2, e não substituem a avaliação de um mecânico qualificado.",
         "Uso responsável" to "Não use o app de forma que tire sua atenção do trânsito. Testes que pedem para acelerar devem ser feitos com o carro parado, em local seguro e ventilado. A medição de aceleração só deve ser usada em local fechado e apropriado, nunca em vias públicas. Respeite sempre as leis de trânsito.",
         "Comandos que alteram a central" to "Algumas funções enviam comandos que apagam dados da central (como apagar códigos de falha, que também zera os monitores de prontidão). O app pede confirmação antes. Você é responsável por decidir usá-las. O terminal permite enviar qualquer comando: use apenas se souber o que está fazendo.",
@@ -103,12 +103,12 @@ object Legal {
     )
 
     val PRIVACY = "Política de privacidade" to listOf(
-        "Resumo" to "Tudo fica no seu aparelho. O Scanner-Max não tem servidor, não cria conta, não usa publicidade e não envia seus dados para ninguém.",
+        "Resumo" to "Tudo fica no seu aparelho. O Scanner Max não tem servidor, não cria conta, não usa publicidade e não envia seus dados para ninguém.",
         "O que fica salvo no aparelho" to "Perfis dos veículos (nome, chassi lido da central, cilindrada, combustível, preço), viagens (distância, tempo, consumo estimado e gráficos), resultados de testes, último diagnóstico, lembretes de manutenção, preferências e o log técnico da sessão.",
         "Localização" to "O app não usa GPS. Em Android 11 ou anterior, o sistema exige a permissão de localização para procurar adaptadores Bluetooth LE; ela é usada só para essa busca.",
         "Permissões" to "Bluetooth: conectar ao adaptador. Dispositivos próximos/Localização: encontrar adaptadores BLE. Notificações: mostrar a conexão e os alertas do carro. USB: usar adaptadores e cabos ligados pelo OTG. Rede: conectar a adaptadores Wi-Fi na rede local deles.",
         "Quando algo sai do aparelho" to "Só quando você escolhe: ao compartilhar um relatório, CSV ou log, ao abrir uma pesquisa de código no navegador, ao buscar os dados do motor pelo chassi (o número do chassi vai para a base pública da NHTSA) ou ao abrir um relato de problema/sugestão no GitHub. Nesses casos vale a política do serviço que você escolheu.",
-        "Apagar seus dados" to "Você pode apagar viagens e testes no próprio app. Para apagar tudo, use Configurações do Android → Apps → Scanner-Max → Armazenamento → Limpar dados, ou desinstale o app.",
+        "Apagar seus dados" to "Você pode apagar viagens e testes no próprio app. Para apagar tudo, use Configurações do Android → Apps → Scanner Max → Armazenamento → Limpar dados, ou desinstale o app.",
     )
 }
 
