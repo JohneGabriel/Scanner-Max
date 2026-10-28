@@ -97,6 +97,8 @@ data class AppPalette(
     val dark: Boolean = true,
 )
 
+private val DEFAULT_PALETTE = AppPalette("Grafite", Color(0xFFFFA726), Color(0xFF4DD0E1), Color(0xFF0A0D12), Color(0xFF121821), Color(0xFF18202B), Color(0xFF1E2531), Color(0xFF2A3341), Color(0xFFE8EDF2), Color(0xFF93A1B0))
+
 val THEMES = listOf(
     AppPalette("Grafite", Color(0xFFFFA726), Color(0xFF4DD0E1), Color(0xFF0A0D12), Color(0xFF121821), Color(0xFF18202B), Color(0xFF1E2531), Color(0xFF2A3341), Color(0xFFE8EDF2), Color(0xFF93A1B0)),
     AppPalette("Meia-noite", Color(0xFF5C9DFF), Color(0xFF7CE0C3), Color(0xFF070B16), Color(0xFF0F1626), Color(0xFF151E33), Color(0xFF1C2740), Color(0xFF26334F), Color(0xFFE6ECF7), Color(0xFF8E9BB5)),
@@ -111,13 +113,13 @@ val THEMES = listOf(
 
 /** Tema atual, global e observável: mudar aqui recolore o app inteiro na hora. */
 object ThemeState {
-    var current by mutableStateOf(THEMES[0])
+    var current by mutableStateOf(DEFAULT_PALETTE)
     fun apply(index: Int) { current = THEMES.getOrElse(index) { THEMES[0] } }
 }
 
 val Accent: Color get() = ThemeState.current.accent
 val Cyan: Color get() = ThemeState.current.accent2
-val Good = Color(0xFF4CAF50).let { if (ThemeState.current.dark) Color(0xFF66BB6A) else Color(0xFF2E9E4F) }
+val Good: Color get() = if (ThemeState.current.dark) Color(0xFF66BB6A) else Color(0xFF2E9E4F)
 val Warn = Color(0xFFFFB74D)
 val Bad = Color(0xFFEF5350)
 private val Hairline: Color get() = if (ThemeState.current.dark) Color(0x14FFFFFF) else Color(0x14000000)
