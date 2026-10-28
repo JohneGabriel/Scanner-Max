@@ -22,6 +22,9 @@ class Elm327(private val log: (String) -> Unit) {
     private var output: OutputStream? = null
     private val lock = Mutex() // um comando por vez: o ELM327 não aceita pedidos sobrepostos
 
+    /** Quando false, os comandos não aparecem no log (usado nos benchmarks). */
+    var verbose = true
+
     val isConnected get() = socket?.isConnected == true
 
     @SuppressLint("MissingPermission")
@@ -43,16 +46,21 @@ class Elm327(private val log: (String) -> Unit) {
     suspend fun init(): String {
         send("ATZ", timeoutMs = 3000)  // reset
         val version = send("ATI")      // versão relatada (clones dizem v1.5 ou v2.1)
+        setupDefaults()
+        send("0100", timeoutMs = 8000) // força a detecção agora (a primeira vez demora)
+        val proto = send("ATDP")
+        log("Protocolo: $proto")
+        return version
+    }
+
+    /** Volta às configurações que o app usa (depois de testes que mexem nelas). */
+    suspend fun setupDefaults() {
         send("ATE0")  // sem eco
         send("ATL0")  // sem quebras de linha extras
         send("ATS0")  // sem espaços nos bytes
         send("ATH0")  // sem cabeçalhos
         send("ATAT1") // timeout adaptativo
         send("ATSP0") // detecta o protocolo sozinho
-        send("0100", timeoutMs = 8000) // força a detecção agora (a primeira vez demora)
-        val proto = send("ATDP")
-        log("Protocolo: $proto")
-        return version
     }
 
     suspend fun send(cmd: String, timeoutMs: Long = 2000): String = lock.withLock {
@@ -71,18 +79,59 @@ class Elm327(private val log: (String) -> Unit) {
                     if (c == '>') break
                     sb.append(c)
                 } else {
-                    Thread.sleep(5)
+                    Thread.sleep(2)
                 }
             }
-            val resp = sb.toString()
-                .replace("SEARCHING...", "")
-                .replace("\r", "\n")
-                .lines().map { it.trim() }.filter { it.isNotEmpty() }
-                .joinToString("\n")
-            log("> $cmd  ←  ${resp.replace("\n", " | ")}")
+            val resp = clean(sb.toString())
+            if (verbose) log("> $cmd  ←  ${resp.replace("\n", " | ")}")
             resp
         }
     }
+
+    /**
+     * Comando de monitoramento (ATMA, ATMR...): o adaptador fica despejando mensagens
+     * até receber qualquer caractere. Escuta por [durationMs] e depois interrompe.
+     */
+    suspend fun monitor(cmd: String, durationMs: Long): List<String> = lock.withLock {
+        withContext(Dispatchers.IO) {
+            val inp = input ?: error("Não conectado")
+            val out = output ?: error("Não conectado")
+            while (inp.available() > 0) inp.read()
+            out.write("$cmd\r".toByteArray())
+            out.flush()
+
+            val sb = StringBuilder()
+            var ended = false
+            val end = System.currentTimeMillis() + durationMs
+            while (System.currentTimeMillis() < end) {
+                if (inp.available() > 0) {
+                    val c = inp.read().toChar()
+                    if (c == '>') { ended = true; break } // parou sozinho (ex.: BUFFER FULL)
+                    sb.append(c)
+                } else Thread.sleep(1)
+            }
+            if (!ended) {
+                out.write("\r".toByteArray()); out.flush()
+                val stop = System.currentTimeMillis() + 2000
+                while (System.currentTimeMillis() < stop) {
+                    if (inp.available() > 0) {
+                        val c = inp.read().toChar()
+                        if (c == '>') break
+                        sb.append(c)
+                    } else Thread.sleep(2)
+                }
+            }
+            val lines = clean(sb.toString()).lines().filter { it.isNotBlank() }
+            log("> $cmd  ←  ${lines.size} linhas em ${durationMs} ms")
+            lines
+        }
+    }
+
+    private fun clean(raw: String) = raw
+        .replace("SEARCHING...", "")
+        .replace("\r", "\n")
+        .lines().map { it.trim() }.filter { it.isNotEmpty() }
+        .joinToString("\n")
 
     /** Lê um PID do modo 01 e devolve os bytes de dados (A, B, C...) ou null. */
     suspend fun readPid(pid: String): IntArray? {
@@ -95,11 +144,11 @@ class Elm327(private val log: (String) -> Unit) {
 
     suspend fun batteryVoltage(): String = send("ATRV")
 
-    /** Códigos de falha. mode = "03" confirmados, "07" pendentes. */
+    /** Códigos de falha. mode = "03" confirmados, "07" pendentes, "0A" permanentes. */
     suspend fun readDtcs(mode: String = "03"): List<String> {
         val respPrefix = (mode.toInt(16) + 0x40).toString(16).uppercase()
         val resp = send(mode, timeoutMs = 5000)
-        if (resp.contains("NO DATA")) return emptyList()
+        if (resp.contains("NO DATA") || resp.contains("?")) return emptyList()
 
         val codes = mutableListOf<String>()
         for (raw in resp.lines()) {
@@ -131,5 +180,14 @@ class Elm327(private val log: (String) -> Unit) {
             val d1 = (v shr 12) and 0x3
             return "$letter$d1${hex.substring(1).uppercase()}"
         }
+
+        /** Junta uma resposta multi-frame (CAN com ATH0) em uma string hex só. */
+        fun joinFrames(resp: String): String = resp.lines()
+            .map { it.replace(" ", "") }
+            .filter { it.length > 3 } // descarta a linha que só traz o tamanho total
+            .joinToString("") { it.replace(Regex("^[0-9A-F]:"), "") }
+
+        fun isError(resp: String) = resp.isBlank() || resp.contains("?") ||
+            listOf("NO DATA", "ERROR", "UNABLE", "STOPPED", "BUS INIT").any { resp.contains(it) }
     }
 }

@@ -4,6 +4,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.bluetooth.BluetoothManager
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Typeface
 import android.os.Build
@@ -17,11 +18,16 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
 
@@ -29,6 +35,12 @@ class MainActivity : ComponentActivity() {
     private lateinit var logView: TextView
     private val gauges = linkedMapOf<String, TextView>()
     private var liveJob: Job? = null
+    private var busyJob: Job? = null
+
+    /** Log completo da sessão (a tela mostra só o fim); é isso que vai para a exportação. */
+    private val fullLog = ArrayList<String>()
+    private var lastReport: String? = null
+    private val timeFmt = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
 
     private val elm = Elm327 { msg -> runOnUiThread { appendLog(msg) } }
 
@@ -61,6 +73,8 @@ class MainActivity : ComponentActivity() {
         button("Iniciar / parar leitura ao vivo") { toggleLive() }
         button("Ler códigos de falha") { readDtcs() }
         button("Apagar códigos de falha") { confirmClear() }
+        button("Testar capacidade do adaptador") { runProbe() }
+        button("Exportar log") { exportLog() }
 
         val grid = GridLayout(this).apply { columnCount = 2 }
         listOf("RPM", "Velocidade", "Temp. motor", "Carga", "Acelerador", "Temp. admissão", "Bateria")
@@ -128,6 +142,7 @@ class MainActivity : ComponentActivity() {
             liveJob?.cancel(); status.text = "Leitura parada"; return
         }
         if (!elm.isConnected) { status.text = "Conecte primeiro"; return }
+        if (busyJob?.isActive == true) { status.text = "Espere o teste terminar"; return }
         liveJob = lifecycleScope.launch {
             status.text = "Lendo ao vivo…"
             while (isActive) {
@@ -189,12 +204,55 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun appendLog(msg: String) {
+        if (fullLog.size > 50_000) fullLog.subList(0, 10_000).clear()
+        fullLog += "${timeFmt.format(Date())}  $msg"
         val lines = (logView.text.toString() + "\n" + msg).lines().takeLast(60)
         logView.text = lines.joinToString("\n").trim()
     }
 
+    private fun runProbe() {
+        if (!elm.isConnected) { status.text = "Conecte primeiro"; return }
+        if (busyJob?.isActive == true) { status.text = "Já tem um teste rodando"; return }
+        liveJob?.cancel()
+        busyJob = lifecycleScope.launch {
+            val report = AdapterProbe(elm) { msg -> runOnUiThread { status.text = msg } }.run()
+            lastReport = report
+            report.lines().forEach { appendLog(it) }
+            AlertDialog.Builder(this@MainActivity)
+                .setTitle("Relatório do adaptador")
+                .setMessage(report)
+                .setPositiveButton("Exportar") { _, _ -> exportLog() }
+                .setNegativeButton("Fechar", null)
+                .show()
+        }
+    }
+
+    private fun exportLog() {
+        if (fullLog.isEmpty()) { status.text = "O log está vazio"; return }
+        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+        val dir = File(cacheDir, "logs").apply { mkdirs() }
+        val file = File(dir, "obd-log-$stamp.txt")
+        file.writeText(buildString {
+            appendLine("OBD ELM327 — log exportado em $stamp")
+            appendLine("Status: ${status.text}")
+            lastReport?.let { appendLine(); appendLine(it) }
+            appendLine()
+            appendLine("=== Log completo ===")
+            fullLog.forEach { appendLine(it) }
+        })
+        val uri = FileProvider.getUriForFile(this, "$packageName.files", file)
+        val share = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, file.name)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(share, "Exportar log"))
+    }
+
     override fun onDestroy() {
         liveJob?.cancel()
+        busyJob?.cancel()
         elm.close()
         super.onDestroy()
     }
