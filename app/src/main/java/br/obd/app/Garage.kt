@@ -110,7 +110,8 @@ object Garage {
         val existing = _vehicles.value.firstOrNull { it.id == id }
         val p = (existing ?: VehicleProfile(
             id = id,
-            name = listOfNotNull(info.maker?.substringBefore(" ("), info.year?.toString()).joinToString(" ").ifBlank { "Meu carro" },
+            name = if (info.vin?.startsWith("SMXDEMO") == true) "Carro de demonstração"
+                else info.maker?.let { m -> listOfNotNull(m.substringBefore(" ("), info.year?.toString()).joinToString(" ") } ?: "Meu carro",
             fuel = if (info.fuelType == 11 || info.fuelType == 3) FuelKind.ETANOL
                 else if (Pids.isDiesel(info.fuelType)) FuelKind.DIESEL else FuelKind.GASOLINA,
         )).copy(

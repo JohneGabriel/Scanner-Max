@@ -27,7 +27,7 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Gavel
-import androidx.compose.material.icons.filled.LightbulbCircle
+import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.LocalGasStation
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.NotificationsActive
@@ -364,9 +364,9 @@ fun AboutScreen(app: AppActions) {
                 "Bluetooth, Bluetooth LE, Wi-Fi e USB",
             ).forEach { Row { Text("•  ", color = Accent); Text(it, style = MaterialTheme.typography.bodyMedium) } }
         }
-        Section("Ajude a melhorar", icon = Icons.Filled.LightbulbCircle) {
+        Section("Ajude a melhorar", icon = Icons.Filled.Lightbulb) {
             MenuRow(Icons.Filled.BugReport, "Reportar problema", "Abre um relato no GitHub com as informações do app", Bad) { Support.bug(app) }
-            MenuRow(Icons.Filled.LightbulbCircle, "Sugerir função", color = Good) { Support.feature(app) }
+            MenuRow(Icons.Filled.Lightbulb, "Sugerir função", color = Good) { Support.feature(app) }
             MenuRow(Icons.Filled.Code, "Código-fonte", REPO.removePrefix("https://"), Cyan) { app.openUrl(REPO) }
         }
         Section("Legal", icon = Icons.Filled.Gavel) {

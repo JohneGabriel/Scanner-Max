@@ -48,7 +48,7 @@ import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.LightbulbCircle
+import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.LocalGasStation
 import androidx.compose.material.icons.filled.Memory
@@ -416,7 +416,7 @@ private fun DrawerContent(app: AppActions, go: (String) -> Unit) {
         MenuRow(Icons.Filled.Palette, "Personalizar", "Temas, painel, alertas, sons") { go("customize") }
         MenuRow(Icons.Filled.Timeline, "Log e exportação", "Para enviar quando algo der errado") { go("log") }
         MenuRow(Icons.Filled.BugReport, "Reportar problema", "Abre um relato no GitHub", Bad) { Support.bug(app) }
-        MenuRow(Icons.Filled.LightbulbCircle, "Sugerir função", "Conte o que faria diferença", Good) { Support.feature(app) }
+        MenuRow(Icons.Filled.Lightbulb, "Sugerir função", "Conte o que faria diferença", Good) { Support.feature(app) }
         MenuRow(Icons.Filled.Info, "Sobre o app") { go("about") }
         MenuRow(Icons.Filled.Gavel, "Termos de uso", color = MaterialTheme.colorScheme.onSurfaceVariant) { go("terms") }
         MenuRow(Icons.Filled.PrivacyTip, "Privacidade", color = MaterialTheme.colorScheme.onSurfaceVariant) { go("privacy") }
