@@ -6,10 +6,12 @@ import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -150,7 +152,13 @@ object ObdManager {
     }
 
     @SuppressLint("MissingPermission")
-    fun connect(device: BluetoothDevice) = scope.launch { connectNow(device) }
+    fun connect(device: BluetoothDevice) = scope.launch {
+        userDisconnected = false
+        connectNow(device)
+    }
+
+    /** true depois de "Desconectar": nenhuma rotina deve reconectar sozinha. */
+    @Volatile private var userDisconnected = false
 
     @SuppressLint("MissingPermission")
     private suspend fun connectNow(device: BluetoothDevice): Boolean = try {
@@ -166,6 +174,8 @@ object ObdManager {
         startService()
         scope.launch { _fuelType.value = runCatching { elm.readPid("51")?.getOrNull(0) }.getOrNull() }
         true
+    } catch (e: CancellationException) {
+        throw e
     } catch (e: Exception) {
         _connected.value = false
         _status.value = "Falha ao conectar: ${e.message}"
@@ -192,6 +202,7 @@ object ObdManager {
     }
 
     fun disconnect() {
+        userDisconnected = true
         setLive(LiveMode.OFF)
         stopRecording()
         elm.close()
@@ -201,10 +212,12 @@ object ObdManager {
     }
 
     private suspend fun reconnect(): Boolean {
+        if (userDisconnected) return false
         _connected.value = false
         val device = elm.lastDevice ?: return false
         for (attempt in 1..3) {
             _status.value = "Conexão caiu — reconectando ($attempt/3)…"
+            if (userDisconnected) return false
             if (connectNow(device)) return true
             delay(2000)
         }
@@ -238,13 +251,16 @@ object ObdManager {
         var tick = 0
         var t0 = System.currentTimeMillis()
         var requests = 0
-        while (scope.isActive && _liveMode.value != LiveMode.OFF) {
+        var emptyCycles = 0
+        while (currentCoroutineContext().isActive && _liveMode.value != LiveMode.OFF) {
             if (!_connected.value || _busy.value != null) { delay(250); continue }
             val plan = if (_liveMode.value == LiveMode.FUEL) fuelPlan else dashboardPlan
             try {
+                var answered = 0
                 for ((def, every) in plan) {
                     if (tick % every != (plan.indexOfFirst { it.first == def } % every)) continue
-                    readInto(def); requests++
+                    if (readInto(def) != null) answered++
+                    requests++
                 }
                 if (tick % 20 == 10) { readBattery(); requests++ }
                 tick++
@@ -254,6 +270,15 @@ object ObdManager {
                     _rate.value = requests * 1000.0 / (now - t0)
                     t0 = now; requests = 0
                 }
+                // Ignição desligada e religada: o Bluetooth continua de pé (a tomada OBD tem
+                // 12 V direto), mas a sessão da linha K com a central morreu. Reabre.
+                emptyCycles = if (answered == 0) emptyCycles + 1 else 0
+                if (emptyCycles >= 3) {
+                    recoverBus()
+                    emptyCycles = 0
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 if (!elm.isConnected) {
                     if (!reconnect()) { setLive(LiveMode.OFF); return }
@@ -262,6 +287,24 @@ object ObdManager {
                     delay(500)
                 }
             }
+        }
+    }
+
+    /** Fecha a sessão antiga com a central e refaz a inicialização até ela responder. */
+    private suspend fun recoverBus() {
+        log("Central parou de responder — reabrindo a comunicação")
+        _status.value = "Carro sem resposta — reabrindo a comunicação…"
+        _values.value = emptyMap()
+        while (currentCoroutineContext().isActive && _liveMode.value != LiveMode.OFF && elm.isConnected) {
+            elm.send("ATPC")
+            val r = elm.send("0100", timeoutMs = 10_000).replace(" ", "")
+            if (r.contains("4100")) {
+                log("Comunicação com o carro restabelecida")
+                _status.value = "Conectado"
+                return
+            }
+            _status.value = "Sem resposta do carro — a ignição está ligada?"
+            delay(3000)
         }
     }
 
@@ -292,6 +335,8 @@ object ObdManager {
             _busy.value = label
             try {
                 block()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: IOException) {
                 log("Falhou: ${e.message}")
                 reconnect()

@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ícone do Scanner-Max: mostrador de rotação com ponteiro, em laranja sobre fundo escuro.
+     Área segura do ícone adaptativo: círculo de 33 dp em volta do centro (54,54). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- trilho do mostrador (270°) -->
+    <path
+        android:pathData="M38.44,69.56 A22,22 0 1,1 69.56,69.56"
+        android:strokeColor="#2A3442"
+        android:strokeWidth="6"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- parte preenchida: de 135° até 300° -->
+    <path
+        android:pathData="M38.44,69.56 A22,22 0 0,1 65,34.95"
+        android:strokeColor="#FFA726"
+        android:strokeWidth="6"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- marcas na faixa vermelha -->
+    <path
+        android:pathData="M72.7,41.6 L76.3,39.4"
+        android:strokeColor="#EF5350"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M75.4,50.2 L79.6,49.6"
+        android:strokeColor="#EF5350"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round" />
+
+    <!-- ponteiro -->
+    <path
+        android:pathData="M54,54 L63,38.4"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round" />
+
+    <!-- eixo do ponteiro -->
+    <path
+        android:pathData="M49.5,54 a4.5,4.5 0 1,0 9,0 a4.5,4.5 0 1,0 -9,0"
+        android:fillColor="#FFFFFF" />
+
+    <!-- sinal de conexão (OBD) abaixo do eixo -->
+    <path
+        android:pathData="M47,66 L61,66"
+        android:strokeColor="#4DD0E1"
+        android:strokeWidth="3"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M50.5,71 L57.5,71"
+        android:strokeColor="#4DD0E1"
+        android:strokeWidth="3"
+        android:strokeLineCap="round" />
+</vector>

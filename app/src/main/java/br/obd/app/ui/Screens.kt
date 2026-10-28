@@ -106,7 +106,8 @@ fun DashboardScreen(onConnect: () -> Unit) {
             }
         }
         Section("Rotação — último minuto") {
-            LineChart(history.takeLast(200).map { it.rpm }, min = 0.0)
+            val rpms = history.takeLast(200).map { it.rpm }
+            LineChart(rpms, min = 0.0, max = maxOf(3000.0, (rpms.filterNotNull().maxOrNull() ?: 0.0) * 1.15))
             Hint("O carro responde a ~%.1f pedidos por segundo (limite da linha K).".format(rate))
         }
         Section("Gravar viagem") {
