@@ -12,8 +12,8 @@ android {
         applicationId = "br.obd.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 18
-        versionName = "1.3"
+        versionCode = 19
+        versionName = "1.4"
     }
 
     signingConfigs {
@@ -66,4 +66,5 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    testImplementation("junit:junit:4.13.2")
 }

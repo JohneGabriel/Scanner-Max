@@ -66,6 +66,29 @@ object Pids {
     val ETHANOL = PidDef("52", "ethanol", "Etanol no combustível", "%") { pct(it) }
     val OIL_TEMP = PidDef("5C", "oilTemp", "Temp. do óleo", "°C") { a(it)?.minus(40) }
     val FUEL_RATE = PidDef("5E", "fuelRate", "Consumo instantâneo", "l/h", 2, 2) { d -> ab(d)?.div(20) }
+    private fun o2v(d: IntArray) = d.getOrNull(0)?.times(0.005)
+    private fun sAB(d: IntArray) = if (d.size >= 2) ((d[0] shl 8) or d[1]).toShort().toDouble() else null
+    val O2B1S3 = PidDef("16", "o2b1s3", "Sonda B1S3", "V", 2, 2) { o2v(it) }
+    val O2B1S4 = PidDef("17", "o2b1s4", "Sonda B1S4", "V", 2, 2) { o2v(it) }
+    val O2B2S1 = PidDef("18", "o2b2s1", "Sonda B2S1", "V", 2, 2) { o2v(it) }
+    val O2B2S2 = PidDef("19", "o2b2s2", "Sonda B2S2", "V", 2, 2) { o2v(it) }
+    val RAIL_REL = PidDef("22", "railRel", "Pressão no trilho (relativa)", "kPa", 2) { d -> ab(d)?.times(0.079) }
+    val EGR_ERR = PidDef("2D", "egrErr", "Erro da EGR", "%", 1, 1) { d -> a(d)?.let { it * 100 / 128 - 100 } }
+    val EVAP_PRESS = PidDef("32", "evapPress", "Pressão do sistema EVAP", "Pa", 2, 1) { d -> sAB(d)?.div(4) }
+    val CAT_B2S1 = PidDef("3D", "catB2S1", "Temp. catalisador B2S1", "°C", 2) { d -> ab(d)?.div(10)?.minus(40) }
+    val CAT_B1S2 = PidDef("3E", "catB1S2", "Temp. catalisador B1S2", "°C", 2) { d -> ab(d)?.div(10)?.minus(40) }
+    val CAT_B2S2 = PidDef("3F", "catB2S2", "Temp. catalisador B2S2", "°C", 2) { d -> ab(d)?.div(10)?.minus(40) }
+    val THROTTLE_B = PidDef("47", "throttleB", "Borboleta B", "%", 1, 1) { pct(it) }
+    val THROTTLE_C = PidDef("48", "throttleC", "Borboleta C", "%", 1, 1) { pct(it) }
+    val PEDAL_E = PidDef("4A", "pedalE", "Pedal do acelerador E", "%", 1, 1) { pct(it) }
+    val PEDAL_F = PidDef("4B", "pedalF", "Pedal do acelerador F", "%", 1, 1) { pct(it) }
+    val THROTTLE_CMD = PidDef("4C", "throttleCmd", "Borboleta comandada", "%", 1, 1) { pct(it) }
+    val PEDAL_REL = PidDef("5A", "pedalRel", "Pedal relativo", "%", 1, 1) { pct(it) }
+    val HYBRID_BATT = PidDef("5B", "hybridBatt", "Bateria híbrida (carga)", "%") { pct(it) }
+    val INJ_TIMING = PidDef("5D", "injTiming", "Ponto de injeção", "°", 2, 1) { d -> ab(d)?.div(128)?.minus(210) }
+    val TORQUE_DEMAND = PidDef("61", "torqueDemand", "Torque pedido", "%") { d -> a(d)?.minus(125) }
+    val TORQUE_ACTUAL = PidDef("62", "torqueActual", "Torque real", "%") { d -> a(d)?.minus(125) }
+    val TORQUE_REF = PidDef("63", "torqueRef", "Torque de referência", "Nm", 2) { ab(it) }
     val ODOMETER = PidDef("A6", "odometer", "Hodômetro", "km", 4, 1) { d ->
         if (d.size < 4) null else ((d[0].toLong() shl 24) or (d[1].toLong() shl 16) or (d[2].toLong() shl 8) or d[3].toLong()) / 10.0
     }
@@ -75,7 +98,10 @@ object Pids {
         THROTTLE, O2S1, O2S2, RUNTIME, DIST_MIL, RAIL_PRESS, WB_LAMBDA, EGR_CMD, PURGE, FUEL_LEVEL, WARMUPS,
         DIST_CLEAR, BARO, WB_LAMBDA_I, CAT_TEMP, MODULE_V, ABS_LOAD, LAMBDA_CMD, THROTTLE_REL, AMBIENT, PEDAL,
         TIME_MIL, TIME_CLEAR, ETHANOL, OIL_TEMP, FUEL_RATE, ODOMETER,
-    )
+        O2B1S3, O2B1S4, O2B2S1, O2B2S2, RAIL_REL, EGR_ERR, EVAP_PRESS, CAT_B2S1, CAT_B1S2, CAT_B2S2,
+        THROTTLE_B, THROTTLE_C, PEDAL_E, PEDAL_F, THROTTLE_CMD, PEDAL_REL, HYBRID_BATT, INJ_TIMING,
+        TORQUE_DEMAND, TORQUE_ACTUAL, TORQUE_REF,
+    ).sortedBy { it.pidInt }
     val byKey = ALL.associateBy { it.key }
     val byPid = ALL.associateBy { it.pidInt }
 

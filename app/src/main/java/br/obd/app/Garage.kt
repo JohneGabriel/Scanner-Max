@@ -108,6 +108,33 @@ object Garage {
         prefs.edit().putString("list", arr.toString()).putString("current", _current.value?.id).apply()
     }
 
+    /**
+     * O que o usuário preencheu no setup inicial antes de conectar. Se já existe um carro,
+     * vai direto nele; senão espera o primeiro carro ser identificado.
+     */
+    fun applySetup(name: String?, displacement: Double?, fuel: FuelKind?, price: Double?) {
+        val cur = _current.value
+        fun VehicleProfile.merged() = copy(
+            name = name?.takeIf { it.isNotBlank() } ?: this.name,
+            displacementL = displacement ?: displacementL, displacementSet = displacement != null || displacementSet,
+            fuel = fuel ?: this.fuel, pricePerL = price ?: pricePerL,
+        )
+        if (cur != null) { save(cur.merged()); return }
+        val o = JSONObject().apply { put("name", name); put("disp", displacement); put("fuel", fuel?.name); put("price", price) }
+        prefs.edit().putString("pending", o.toString()).apply()
+    }
+
+    private fun takePending(): ((VehicleProfile) -> VehicleProfile)? {
+        val raw = prefs.getString("pending", null) ?: return null
+        prefs.edit().remove("pending").apply()
+        val o = runCatching { JSONObject(raw) }.getOrNull() ?: return null
+        val name = o.optStringOrNull("name"); val disp = o.optDoubleOrNull("disp")
+        val fuel = o.optStringOrNull("fuel")?.let { runCatching { FuelKind.valueOf(it) }.getOrNull() }
+        val price = o.optDoubleOrNull("price")
+        return { p -> p.copy(name = name?.takeIf { it.isNotBlank() } ?: p.name, displacementL = disp ?: p.displacementL,
+            displacementSet = disp != null || p.displacementSet, fuel = fuel ?: p.fuel, pricePerL = price ?: p.pricePerL) }
+    }
+
     /** Chamado quando o carro é identificado: acha o perfil pelo chassi ou cria um. */
     fun onIdentified(info: VehicleInfo, adapterKey: String): VehicleProfile {
         val id = info.vin ?: "sem-chassi:$adapterKey"
@@ -118,7 +145,7 @@ object Garage {
                 else info.maker?.let { m -> listOfNotNull(m.substringBefore(" ("), info.year?.toString()).joinToString(" ") } ?: "Meu carro",
             fuel = if (info.fuelType == 11 || info.fuelType == 3) FuelKind.ETANOL
                 else if (Pids.isDiesel(info.fuelType)) FuelKind.DIESEL else FuelKind.GASOLINA,
-        )).copy(
+        )).let { base -> if (existing == null && !id.startsWith("SMXDEMO")) takePending()?.invoke(base) ?: base else base }.copy(
             maker = info.maker ?: existing?.maker, year = info.year ?: existing?.year, vin = info.vin,
             protocol = info.protocol, lastSeen = System.currentTimeMillis(),
         )

@@ -115,7 +115,13 @@ data class TripSummary(
  * Acompanha a viagem em andamento a cada leitura do painel. Começa quando o motor liga e
  * termina quando ele fica 45 s desligado (ou a conexão acaba).
  */
-class TripTracker(private val onFinish: (TripSummary, List<TripPoint>) -> Unit) {
+class TripTracker(
+    private val clock: () -> Long = { System.currentTimeMillis() },
+    /** Salva a viagem em andamento de tempos em tempos (não perde nada se o app for fechado). */
+    private val onCheckpoint: (TripSummary, List<TripPoint>) -> Unit = { _, _ -> },
+    private val onFinish: (TripSummary, List<TripPoint>) -> Unit,
+) {
+    private var lastCheckpoint = 0L
     private var active = false
     private var start = 0L
     private var last = 0L
@@ -146,7 +152,7 @@ class TripTracker(private val onFinish: (TripSummary, List<TripPoint>) -> Unit) 
     val live: StateFlow<TripSummary?> = _live.asStateFlow()
 
     fun onTick(v: Map<String, Double>, fresh: Boolean, p: VehicleProfile?) {
-        val now = System.currentTimeMillis()
+        val now = clock()
         val rpm = if (fresh) v["rpm"] else null
         val on = rpm != null && rpm >= 300
         if (on) lastEngineOn = now
@@ -155,6 +161,10 @@ class TripTracker(private val onFinish: (TripSummary, List<TripPoint>) -> Unit) 
             return
         }
         if (!on && now - lastEngineOn > 45_000) { finish(); return }
+        if (now - lastCheckpoint >= 60_000 && runSec >= 60) {
+            lastCheckpoint = now
+            runCatching { onCheckpoint(summary(now), points.toList()) }
+        }
         val dt = ((now - last) / 1000.0).coerceIn(0.0, 5.0)
         last = now
         if (!on || dt <= 0) { publish(now); return }
@@ -199,7 +209,7 @@ class TripTracker(private val onFinish: (TripSummary, List<TripPoint>) -> Unit) 
     }
 
     private fun begin(now: Long, v: Map<String, Double>, p: VehicleProfile?) {
-        active = true; start = now; last = now; lastEngineOn = now
+        active = true; start = now; last = now; lastEngineOn = now; lastCheckpoint = now
         km = 0.0; raw = 0.0; runSec = 0.0; idleSec = 0.0; movingSec = 0.0; maxSpeed = 0.0; maxRpm = 0.0
         rpmSum = 0.0; coolSum = 0.0; coolSec = 0.0; maxCool = null; startCool = v["coolant"]; warmupSec = null
         battMin = null; battSum = 0.0; battN = 0; acc = 0; brk = 0; bands.fill(0.0); cutSec = 0.0
@@ -227,7 +237,7 @@ class TripTracker(private val onFinish: (TripSummary, List<TripPoint>) -> Unit) 
     fun finish() {
         if (!active) return
         active = false
-        val s = summary(last)
+        val s = summary(lastEngineOn.coerceAtLeast(start))
         _live.value = null
         if (s.runSec >= 60 || s.km >= 0.2) onFinish(s, points.toList())
     }

@@ -72,7 +72,8 @@ fun TripsScreen(app: AppActions) {
     val periods = listOf("7 dias" to 7, "30 dias" to 30, "Tudo" to 36500)
     val since = System.currentTimeMillis() - periods[period].second * 86400000L
     val mine = all.filter { veh == null || it.vehicleId == veh!!.id || it.vehicleId == null }
-    val list = mine.filter { it.start >= since }
+    // a viagem em andamento é salva de minuto em minuto: não aparece duplicada na lista
+    val list = mine.filter { it.start >= since && it.id != live?.id }
     val tot = TripTotals.of(list)
 
     ScreenColumn {

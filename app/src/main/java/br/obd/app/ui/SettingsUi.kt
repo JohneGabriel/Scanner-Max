@@ -71,6 +71,7 @@ import br.obd.app.Feedback
 import br.obd.app.FuelKind
 import br.obd.app.Garage
 import br.obd.app.ObdManager
+import br.obd.app.Pids
 import br.obd.app.Reports
 import br.obd.app.Settings
 
@@ -289,32 +290,7 @@ fun AdapterScreen(app: AppActions) {
 fun CustomizeScreen() {
     val prefs by Settings.prefs.collectAsState()
     ScreenColumn {
-        Section("Tema", icon = Icons.Filled.Palette) {
-            THEMES.chunked(3).forEachIndexed { r, row ->
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    row.forEachIndexed { c, t ->
-                        val i = r * 3 + c
-                        val sel = prefs.theme == i
-                        val border by animateColorAsState(if (sel) t.accent else MaterialTheme.colorScheme.outlineVariant, label = "b")
-                        Column(
-                            Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).border(BorderStroke(if (sel) 2.dp else 1.dp, border), RoundedCornerShape(16.dp))
-                                .background(Brush.linearGradient(listOf(t.bg, t.surface)))
-                                .pressable { Settings.update { it.copy(theme = i) }; Feedback.tick() }.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Box(Modifier.size(16.dp).clip(CircleShape).background(t.accent))
-                                Box(Modifier.size(16.dp).clip(CircleShape).background(t.accent2))
-                            }
-                            Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(t.highest))
-                            Box(Modifier.fillMaxWidth(0.6f).height(6.dp).clip(RoundedCornerShape(3.dp)).background(t.accent.copy(alpha = 0.7f)))
-                            Text(t.name, style = MaterialTheme.typography.labelMedium, color = t.text, maxLines = 1)
-                        }
-                    }
-                    repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
-                }
-            }
-        }
+        Section("Tema", icon = Icons.Filled.Palette) { ThemePicker() }
         Section("Painel", icon = Icons.Filled.Dashboard) {
             Text("Segundo mostrador", style = MaterialTheme.typography.titleSmall)
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -325,7 +301,9 @@ fun CustomizeScreen() {
             Text("Cartões visíveis", style = MaterialTheme.typography.titleSmall)
             listOf("coolant" to "Temperatura do motor", "battery" to "Bateria", "load" to "Carga", "throttle" to "Borboleta",
                 "iat" to "Temp. de admissão", "map" to "Pressão do coletor", "maf" to "Fluxo de ar", "advance" to "Avanço",
-                "fuelLevel" to "Nível do tanque", "oilTemp" to "Temp. do óleo", "ethanol" to "Etanol medido").forEach { (k, l) ->
+                "fuelLevel" to "Nível do tanque", "oilTemp" to "Temp. do óleo", "ethanol" to "Etanol medido")
+                .filter { (k, _) -> val v = ObdManager.vehicle.value; k == "battery" || v.supported.isEmpty() || Pids.byKey[k]?.let { v.has(it) } == true }
+                .forEach { (k, l) ->
                 ToggleRow(l, k !in prefs.hiddenCards) { on ->
                     Settings.update { it.copy(hiddenCards = if (on) it.hiddenCards - k else it.hiddenCards + k) }
                 }
@@ -397,5 +375,39 @@ fun AboutScreen(app: AppActions) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Hint("Bibliotecas: Jetpack Compose e AndroidX (Apache 2.0), Kotlin Coroutines (Apache 2.0), usb-serial-for-android (MIT).")
         }
+    }
+}
+
+
+/** Grade de temas com prévia das cores (usada no setup e em Personalizar). */
+@Composable
+fun ThemePicker() {
+    val prefs by Settings.prefs.collectAsState()
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        THEMES.chunked(3).forEachIndexed { r, row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                row.forEachIndexed { c, t ->
+                    val i = r * 3 + c
+                    val sel = prefs.theme == i
+                    val border by animateColorAsState(if (sel) t.accent else MaterialTheme.colorScheme.outlineVariant, label = "b")
+                    Column(
+                        Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).border(BorderStroke(if (sel) 2.dp else 1.dp, border), RoundedCornerShape(16.dp))
+                            .background(Brush.linearGradient(listOf(t.bg, t.surface)))
+                            .pressable { Settings.update { it.copy(theme = i) }; Feedback.tick() }.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Box(Modifier.size(16.dp).clip(CircleShape).background(t.accent))
+                            Box(Modifier.size(16.dp).clip(CircleShape).background(t.accent2))
+                        }
+                        Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(t.highest))
+                        Box(Modifier.fillMaxWidth(0.6f).height(6.dp).clip(RoundedCornerShape(3.dp)).background(t.accent.copy(alpha = 0.7f)))
+                        Text(t.name, style = MaterialTheme.typography.labelMedium, color = t.text, maxLines = 1)
+                    }
+                }
+                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    
     }
 }

@@ -23,6 +23,18 @@ jobs:
         with:
           gradle-version: "8.9"
 
+      - name: Testes de unidade
+        run: |
+          set -o pipefail
+          gradle testReleaseUnitTest --no-daemon 2>&1 | tee test.log
+
+      - name: Anotar testes que falharam
+        if: failure()
+        run: |
+          grep -E "FAILED|AssertionError|expected|Exception|^e: " test.log | head -30 | while IFS= read -r l; do
+            echo "::error::$l"
+          done
+
       - name: Compilar APK
         run: |
           set -o pipefail

@@ -125,6 +125,24 @@ object ObdManager {
     private val _terminal = MutableStateFlow<List<String>>(emptyList())
     val terminal: StateFlow<List<String>> = _terminal.asStateFlow()
 
+    private val misses = HashMap<String, Int>()
+    private val _unavailable = MutableStateFlow<Set<String>>(emptySet())
+    /**
+     * Sensores que a central diz suportar mas não respondem na prática (6 falhas seguidas
+     * enquanto os outros respondem). Somem do painel até a próxima conexão.
+     */
+    val unavailable: StateFlow<Set<String>> = _unavailable.asStateFlow()
+
+    private fun note(def: PidDef, ok: Boolean) {
+        if (ok) { misses[def.key] = 0; return }
+        val n = (misses[def.key] ?: 0) + 1
+        misses[def.key] = n
+        if (n >= 6 && def != Pids.RPM && def.key !in _unavailable.value) {
+            _unavailable.value = _unavailable.value + def.key
+            log("Sensor ${def.label} (PID ${def.pid}) não responde: escondido até reconectar")
+        }
+    }
+
     private val _adapter = MutableStateFlow(AdapterProfile())
     /** O que o adaptador conectado é e aceita. */
     val adapter: StateFlow<AdapterProfile> = _adapter.asStateFlow()
@@ -134,7 +152,9 @@ object ObdManager {
     val link: StateFlow<LinkTarget?> = _link.asStateFlow()
 
     /** Viagem automática: começa quando o motor liga, termina 45 s depois de desligar. */
-    val trip = TripTracker { s, pts ->
+    val trip = TripTracker(
+        onCheckpoint = { s, pts -> if (s.vehicleId?.startsWith("SMXDEMO") != true) TripStore.save(s, pts) },
+    ) { s, pts ->
         if (s.vehicleId?.startsWith("SMXDEMO") == true) return@TripTracker
         TripStore.save(s, pts)
         Garage.addTrip(s.km, s.rawLiters)
@@ -204,6 +224,7 @@ object ObdManager {
         if (_status.value.startsWith("Conectando")) return@launch
         if (target.kind == LinkKind.DEMO) beforeDemo = Garage.current.value?.id?.takeIf { !it.startsWith("SMXDEMO") }
         userDisconnected = false
+        misses.clear(); _unavailable.value = emptySet()
         _vehicle.value = VehicleInfo()
         _values.value = emptyMap()
         Alerts.reset()
@@ -356,7 +377,7 @@ object ObdManager {
      */
     private fun plan(mode: LiveMode): List<Pair<PidDef, Int>> {
         val v = _vehicle.value
-        fun ok(d: PidDef) = if (v.supported.isEmpty()) d in BASIC else v.has(d)
+        fun ok(d: PidDef) = d.key !in _unavailable.value && (if (v.supported.isEmpty()) d in BASIC else v.has(d))
         val base = listOf(
             Pids.RPM to 1, Pids.SPEED to 2, Pids.MAP to 3, Pids.MAF to 3, Pids.FUEL_RATE to 3, Pids.THROTTLE to 3,
             Pids.LOAD to 6, Pids.FUEL_STATUS to 8, Pids.STFT to 8, Pids.ADVANCE to 10, Pids.COOLANT to 12,
@@ -370,7 +391,7 @@ object ObdManager {
     /** Sensores fora do plano principal, lidos em rodízio para a lista "Todos os sensores". */
     private fun extras(planDefs: Set<PidDef>): List<PidDef> {
         val v = _vehicle.value
-        return Pids.ALL.filter { v.has(it) && it !in planDefs }
+        return Pids.ALL.filter { v.has(it) && it !in planDefs && it.key !in _unavailable.value }
     }
 
     private var uiMode = LiveMode.OFF
@@ -474,8 +495,11 @@ object ObdManager {
         val got = parseMulti(resp)
         var n = 0
         val upd = HashMap<String, Double>()
+        val anyAnswer = got.isNotEmpty()
         for (d in batch) {
-            val v = got[d.pidInt]?.let(d.decode) ?: continue
+            val v = got[d.pidInt]?.let(d.decode)
+            if (anyAnswer) note(d, v != null)
+            if (v == null) continue
             upd[d.key] = v; n++
             if (d == Pids.LTFT) trackLtft(v)
         }
@@ -586,7 +610,10 @@ object ObdManager {
     }
 
     private suspend fun readInto(def: PidDef): Double? {
-        val v = elm.readPid(def.pid)?.let(def.decode) ?: return null
+        val v = elm.readPid(def.pid)?.let(def.decode)
+        // só conta como falha do sensor se a central está respondendo a outros
+        if (System.currentTimeMillis() - lastLiveAt < 5000) note(def, v != null)
+        if (v == null) return null
         _values.update { it + (def.key to v) }
         if (def == Pids.LTFT) trackLtft(v)
         return v

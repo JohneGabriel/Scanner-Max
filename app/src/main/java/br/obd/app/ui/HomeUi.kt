@@ -75,6 +75,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -469,8 +472,9 @@ private fun LiveDashboard(app: AppActions) {
         ), minCell = 96.dp, maxCols = 3) { (icon, label, action), m -> ActionTile(icon, label, m, onClick = action) }
 
         if (veh.supported.isNotEmpty()) {
-            val all = Pids.ALL.filter { veh.has(it) }
-            Section("Todos os sensores (${all.size})", icon = Icons.Filled.Sensors, trailing = {
+            val unavailable by ObdManager.unavailable.collectAsState()
+            val all = Pids.ALL.filter { veh.has(it) && it.key !in unavailable }
+            Section("Sensores deste carro (${all.size})", icon = Icons.Filled.Sensors, trailing = {
                 TextButton(onClick = { showAll = !showAll }) { BtnLabel(if (showAll) "Esconder" else "Mostrar") }
             }) {
                 Column(Modifier.animateContentSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -484,7 +488,9 @@ private fun LiveDashboard(app: AppActions) {
                             })
                         }
                         Hint("Os sensores fora do painel são lidos em rodízio: cada um atualiza a cada poucos segundos.")
-                    } else Hint("Tudo o que este carro informa pelo OBD, incluindo o que não aparece no painel.")
+                    } else Hint("${all.size} de ${Pids.ALL.size} sensores que o app conhece respondem neste carro" +
+                        (if (unavailable.isNotEmpty()) " (${unavailable.size} declarado(s) pela central mas sem resposta, escondido(s))." else ".") +
+                        " O app pergunta à central o que ela suporta e mostra só o que funciona.")
                 }
             }
         }
@@ -551,35 +557,54 @@ fun AlertBanner(a: Alert) {
 
 // ============================================================== saúde do motor
 
-/** Cartão do painel: placar animado, resumo e os sistemas em pastilhas. */
+/** Estado do cartão de saúde: começa recolhido a cada abertura do app. */
+private object HealthCardState { var expanded by androidx.compose.runtime.mutableStateOf(false) }
+
+/**
+ * Cartão do painel. Recolhido: uma linha com a nota e uma barra de progresso.
+ * Expandido: anel, resumo e os sistemas em pastilhas.
+ */
 @Composable
 fun HealthCard(h: br.obd.app.HealthSummary, app: AppActions) {
     val c = if (h.level == Level.INFO) MaterialTheme.colorScheme.onSurfaceVariant else levelColor(h.level)
     val anim by androidx.compose.animation.core.animateIntAsState(h.score, tween(900), label = "score")
-    AppCard(onClick = { app.nav.go("health") }) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Ring(if (h.level == Level.INFO) 0f else anim / 100f, Modifier.size(84.dp), color = c, stroke = 9f) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    FitText(if (h.level == Level.INFO) "—" else "$anim", Tabular.copy(fontSize = 26.sp, fontWeight = FontWeight.Bold),
-                        Modifier.padding(horizontal = 14.dp), color = c)
-                    Text("saúde", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(h.headline, style = MaterialTheme.typography.titleMedium, color = if (h.level == Level.GOOD) MaterialTheme.colorScheme.onSurface else c,
-                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+    val expanded = HealthCardState.expanded
+    val rot by androidx.compose.animation.core.animateFloatAsState(if (expanded) 180f else 0f, label = "chev")
+    val track = MaterialTheme.colorScheme.surfaceVariant
+    val frac by androidx.compose.animation.core.animateFloatAsState(if (h.level == Level.INFO) 0f else anim / 100f, tween(700), label = "bar")
+    AppCard(Modifier.animateContentSize()) {
+        // linha sempre visível: toque expande/recolhe
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).pressable { HealthCardState.expanded = !expanded },
+            verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Favorite, null, Modifier.size(18.dp), tint = c)
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(h.headline, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f),
+                        color = if (h.level == Level.GOOD || h.level == Level.INFO) MaterialTheme.colorScheme.onSurface else c,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (h.live) PulseDot(Good, 5)
-                    Text(if (h.live) "ao vivo" else "último dado salvo", style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if (h.level == Level.INFO) "—" else "$anim", style = MaterialTheme.typography.titleSmall.merge(Tabular), color = c)
                 }
-                val issues = h.items.filter { it.level == Level.BAD || it.level == Level.WARN }
-                Text(if (issues.isEmpty()) "${h.items.count { it.level == Level.GOOD }} sistemas em ordem" else issues.take(2).joinToString(" · ") { it.label },
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                androidx.compose.foundation.Canvas(Modifier.fillMaxWidth().height(6.dp)) {
+                    drawRoundRect(track, cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2))
+                    drawRoundRect(c, size = androidx.compose.ui.geometry.Size(size.width * frac, size.height),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2))
+                }
             }
+            Spacer(Modifier.width(6.dp))
+            Icon(Icons.Filled.ExpandMore, if (expanded) "Recolher" else "Expandir", Modifier.rotate(rot),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        AdaptiveGrid(h.items.take(6), minCell = 140.dp, maxCols = 3, spacing = 8.dp) { item, m -> HealthChip(item, m) }
+        if (expanded) {
+            val issues = h.items.filter { it.level == Level.BAD || it.level == Level.WARN }
+            Text(if (issues.isEmpty()) "${h.items.count { it.level == Level.GOOD }} sistemas em ordem" +
+                    (if (h.live) " · ao vivo" else " · último dado salvo")
+                else issues.joinToString(" · ") { "${it.label}: ${it.value}" },
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            AdaptiveGrid(h.items, minCell = 140.dp, maxCols = 3, spacing = 8.dp) { item, m -> HealthChip(item, m) }
+            TextButton(onClick = { app.nav.go("health") }) { BtnLabel("Ver detalhes e testes") }
+        }
     }
 }
 

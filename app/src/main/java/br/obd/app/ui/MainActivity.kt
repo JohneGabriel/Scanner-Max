@@ -225,7 +225,7 @@ private fun AppRoot() {
     // reconecta sozinho ao último adaptador ao abrir (se o usuário quiser)
     LaunchedEffect(Unit) {
         val t = ObdManager.savedTarget
-        if (prefs.autoConnect && t != null && !connected && t.kind != br.obd.app.link.LinkKind.USB &&
+        if (prefs.onboarded && prefs.autoConnect && t != null && !connected && t.kind != br.obd.app.link.LinkKind.USB &&
             Permissions.hasBluetooth(context)) {
             delay(900)
             ObdManager.connect(t)
@@ -342,7 +342,10 @@ private fun AppRoot() {
             }
         }
 
-        AnimatedVisibility(splash, enter = fadeIn(), exit = fadeOut(tween(450))) { Splash { splash = false } }
+        AnimatedVisibility(!splash && !prefs.onboarded, enter = fadeIn(tween(400)), exit = fadeOut(tween(350))) {
+            SetupScreen { connect -> if (connect) nav.go("connect") }
+        }
+        AnimatedVisibility(splash, enter = fadeIn(), exit = fadeOut(tween(600))) { Splash { splash = false } }
     }
 }
 
@@ -463,11 +466,12 @@ private fun Splash(onDone: () -> Unit) {
     val textAlpha = remember { Animatable(0f) }
     val scale = remember { Animatable(0.85f) }
     LaunchedEffect(Unit) {
-        launch { scale.animateTo(1f, tween(700, easing = FastOutSlowInEasing)) }
-        sweep.animateTo(1f, tween(650, easing = FastOutSlowInEasing))
-        sweep.animateTo(0.62f, tween(380, easing = FastOutSlowInEasing))
-        textAlpha.animateTo(1f, tween(320))
-        delay(350)
+        launch { scale.animateTo(1f, tween(1000, easing = FastOutSlowInEasing)) }
+        delay(150)
+        sweep.animateTo(1f, tween(1000, easing = FastOutSlowInEasing))
+        sweep.animateTo(0.62f, tween(550, easing = FastOutSlowInEasing))
+        textAlpha.animateTo(1f, tween(500))
+        delay(1100)
         onDone()
     }
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
