@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -115,8 +116,8 @@ fun TestsScreen(app: AppActions) {
                     IconBadge(testIcon(def.id), Accent, 44)
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(def.title, style = MaterialTheme.typography.titleMedium)
-                        Hint(def.subtitle)
+                        Text(def.title, style = MaterialTheme.typography.titleMedium, maxLines = 1)
+                        Text(def.subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
                     }
                     Column(horizontalAlignment = Alignment.End) {
                         Text(def.duration, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -264,10 +265,10 @@ private fun TestRunning(def: TestDef) {
         Text("Etapa ${s.step} de ${s.steps} · ${s.stepTitle}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
         Box(Modifier.fillMaxWidth().padding(horizontal = 40.dp), contentAlignment = Alignment.Center) {
-            Ring(s.progress, Modifier.fillMaxWidth().scale(ps), color = urgentColor, stroke = 16f) {
+            Ring(s.progress, Modifier.widthIn(max = 300.dp).fillMaxWidth().scale(ps), color = urgentColor, stroke = 16f) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     AnimatedContent(s.big, transitionSpec = { fadeIn(tween(120)) togetherWith fadeOut(tween(120)) }, label = "big") { b ->
-                        Text(b, style = Tabular, fontSize = 52.sp, fontWeight = FontWeight.Bold)
+                        FitText(b, Tabular.copy(fontSize = 52.sp, fontWeight = FontWeight.Bold), Modifier.padding(horizontal = 28.dp))
                     }
                     Text(s.bigUnit, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     s.secondsLeft?.let { Text("${it}s", style = MaterialTheme.typography.labelLarge.merge(Tabular), color = urgentColor) }
@@ -285,7 +286,7 @@ private fun TestRunning(def: TestDef) {
             }
         }
         if (s.chart.size >= 2) AppCard { LineChart(s.chart, min = s.chartMin, max = s.chartMax, reference = s.chartRef, color = urgentColor, height = 110) }
-        OutlinedButton(onClick = { TestRunner.cancel() }, modifier = Modifier.fillMaxWidth()) { Text("Cancelar teste") }
+        OutlinedButton(onClick = { TestRunner.cancel() }, modifier = Modifier.fillMaxWidth()) { BtnLabel("Cancelar teste") }
     }
 }
 
@@ -349,10 +350,10 @@ fun ReportView(r: TestReport, app: AppActions, fresh: Boolean) {
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedButton(onClick = { TestRunner.clearResult(); if (!fresh) app.nav.go("test", r.testId) }, Modifier.weight(1f)) {
-                Icon(Icons.Filled.Refresh, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Repetir")
+                Icon(Icons.Filled.Refresh, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); BtnLabel("Repetir")
             }
             Button(onClick = { app.share(Reports.test(ObdManager.context, r), "application/pdf") }, Modifier.weight(1f)) {
-                Icon(Icons.Filled.PictureAsPdf, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("PDF")
+                Icon(Icons.Filled.PictureAsPdf, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); BtnLabel("PDF")
             }
         }
         if (!fresh) TextButton(onClick = { TestRunner.delete(r); app.nav.back() }) { Text("Apagar este resultado", color = Bad) }

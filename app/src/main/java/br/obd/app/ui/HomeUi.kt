@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -78,6 +79,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import br.obd.app.Alert
@@ -99,10 +101,13 @@ import kotlinx.coroutines.delay
 
 @Composable
 fun ScreenColumn(content: @Composable () -> Unit) {
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) { content(); Spacer(Modifier.height(28.dp)) }
+    // conteúdo centralizado e com largura máxima: em tablet/paisagem não estica de ponta a ponta
+    Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), contentAlignment = Alignment.TopCenter) {
+        Column(
+            Modifier.widthIn(max = 720.dp).fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) { content(); Spacer(Modifier.height(28.dp)) }
+    }
 }
 
 @Composable
@@ -125,27 +130,30 @@ private fun OfflineHome(app: AppActions) {
         // herói
         Box(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp))
-                .background(Brush.linearGradient(listOf(Accent.copy(alpha = 0.22f), MaterialTheme.colorScheme.surfaceContainer, Cyan.copy(alpha = 0.10f))))
+                .background(Brush.linearGradient(listOf(Accent.copy(alpha = 0.14f), MaterialTheme.colorScheme.surfaceContainer)))
                 .padding(20.dp),
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val t = rememberInfiniteTransition(label = "idle")
                     val sw by t.animateFloat(0.15f, 0.75f, infiniteRepeatable(tween(2600, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "sw")
-                    LogoMark(64, if (connecting) sw else 0.25f + sw * 0.1f)
+                    LogoMark(52, if (connecting) sw else 0.25f + sw * 0.1f)
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(if (connecting) "Conectando…" else if (veh != null) "Olá! Vamos ver o ${veh!!.name}?" else "Conecte seu carro",
-                            style = MaterialTheme.typography.titleLarge)
-                        Hint(if (connecting) status else "Plugue o adaptador na tomada OBD (embaixo do volante), ligue a ignição e conecte.")
+                        Text(if (connecting) "Conectando…" else veh?.name ?: "Conecte seu carro",
+                            style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(if (connecting) status else "Adaptador na tomada OBD e ignição ligada.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(onClick = app.onConnect, modifier = Modifier.weight(1f), contentPadding = ButtonDefaults.ButtonWithIconContentPadding) {
-                        Icon(Icons.Filled.Bluetooth, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Conectar")
+                        Icon(Icons.Filled.Bluetooth, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); BtnLabel("Conectar")
                     }
-                    OutlinedButton(onClick = { ObdManager.connect(LinkTarget.DEMO) }, modifier = Modifier.weight(1f)) {
-                        Icon(Icons.Filled.PlayCircle, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Demonstração")
+                    OutlinedButton(onClick = { ObdManager.connect(LinkTarget.DEMO) }, modifier = Modifier.weight(1f),
+                        contentPadding = ButtonDefaults.ButtonWithIconContentPadding) {
+                        Icon(Icons.Filled.PlayCircle, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); BtnLabel("Demonstração")
                     }
                 }
             }
@@ -214,8 +222,8 @@ private fun OfflineHome(app: AppActions) {
 @Composable
 private fun MiniStat(label: String, value: String, modifier: Modifier = Modifier, color: Color? = null) {
     Column(modifier.clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(10.dp)) {
-        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-        Text(value, style = MaterialTheme.typography.titleSmall.merge(Tabular), color = color ?: MaterialTheme.colorScheme.onSurface, maxLines = 1)
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        FitText(value, MaterialTheme.typography.titleSmall.merge(Tabular), color = color ?: MaterialTheme.colorScheme.onSurface)
     }
 }
 
@@ -250,19 +258,15 @@ private fun MaintenanceBanner(app: AppActions) {
 @Composable
 private fun QuickActions(app: AppActions) {
     val items = listOf(
-        Triple(Icons.Filled.Science, "Testes guiados") { app.nav.home(2) },
-        Triple(Icons.Filled.Route, "Viagens e consumo") { app.nav.home(1) },
-        Triple(Icons.Filled.Search, "Consultar código") { app.nav.go("lookup") },
-        Triple(Icons.Filled.Assessment, "Relatório PDF") { HealthReport.share(app) },
-        Triple(Icons.Filled.LocalGasStation, "Etanol ou gasolina") { app.nav.go("flex") },
+        Triple(Icons.Filled.Science, "Testes") { app.nav.home(2) },
+        Triple(Icons.Filled.Route, "Viagens") { app.nav.home(1) },
+        Triple(Icons.Filled.Search, "Códigos") { app.nav.go("lookup") },
+        Triple(Icons.Filled.Assessment, "Relatório") { HealthReport.share(app) },
+        Triple(Icons.Filled.LocalGasStation, "Combustível") { app.nav.go("flex") },
         Triple(Icons.Filled.Build, "Manutenção") { app.nav.go("maint") },
     )
     Text("Atalhos", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 4.dp))
-    items.chunked(3).forEach { row ->
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            row.forEach { (icon, label, action) -> ActionTile(icon, label, Modifier.weight(1f), onClick = action) }
-        }
-    }
+    AdaptiveGrid(items, minCell = 96.dp, maxCols = 6) { (icon, label, action), m -> ActionTile(icon, label, m, onClick = action) }
 }
 
 private val TIPS = listOf(
@@ -340,14 +344,15 @@ private fun LiveDashboard(app: AppActions) {
                 Column(Modifier.weight(1f)) {
                     Text(profile?.name ?: listOfNotNull(veh.maker, veh.year?.toString()).joinToString(" ").ifBlank { "Identificando o carro…" },
                         style = MaterialTheme.typography.titleMedium, maxLines = 1)
-                    Hint(listOfNotNull(veh.protocol.takeIf { it != "—" }, if (veh.supported.isNotEmpty()) "${veh.supported.size} sensores" else null,
-                        "%.1f leituras/s".format(rate)).joinToString(" · "))
+                    Text(listOfNotNull(veh.protocol.takeIf { it != "—" }, if (veh.supported.isNotEmpty()) "${veh.supported.size} sensores" else null,
+                        "%.1f/s".format(rate)).joinToString(" · "), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (running) PulseDot(Good, 7)
-                        Text(when { busy != null -> "Ocupado"; rpm == null -> "Aguardando"; running -> "Motor ligado"; else -> "Motor desligado" },
-                            style = MaterialTheme.typography.labelLarge, color = if (running) Good else MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(when { busy != null -> "Ocupado"; rpm == null -> "Aguardando"; running -> "Ligado"; else -> "Desligado" },
+                            style = MaterialTheme.typography.labelLarge, maxLines = 1, color = if (running) Good else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     val mil = v["milOn"] == 1.0
                     val codes = v["milCount"]?.toInt()
@@ -409,17 +414,12 @@ private fun LiveDashboard(app: AppActions) {
             if (veh.has(Pids.OIL_TEMP)) add(CardSpec("oilTemp", "Óleo", fmt(v["oilTemp"], unit = " °C"), Icons.Filled.Opacity, null))
             if (veh.has(Pids.ETHANOL)) add(CardSpec("ethanol", "Etanol", fmt(v["ethanol"], unit = "%"), Icons.Filled.WaterDrop, null))
         }.filter { it.key !in prefs.hiddenCards }
-        cards.chunked(3).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                row.forEach { StatCard(it.label, it.value, Modifier.weight(1f), it.color, it.icon) }
-                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
-            }
-        }
+        AdaptiveGrid(cards, minCell = 100.dp, maxCols = 6) { c, m -> StatCard(c.label, c.value, m, c.color, c.icon) }
 
         // correções
         if (has(Pids.STFT) || has(Pids.LTFT)) {
             Section("Mistura (correções)", icon = Icons.Filled.Tune, trailing = {
-                TextButton(onClick = { app.nav.go("test", "mixture") }) { Text("Testar") }
+                TextButton(onClick = { app.nav.go("test", "mixture") }) { BtnLabel("Testar") }
             }) {
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     TrimCol("Curto prazo", v["stft"], Modifier.weight(1f))
@@ -440,16 +440,16 @@ private fun LiveDashboard(app: AppActions) {
         }
 
         // ações rápidas conectado
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            ActionTile(Icons.Filled.Warning, "Ler códigos", Modifier.weight(1f)) { app.nav.home(3); ObdManager.readDiagnostics() }
-            ActionTile(Icons.Filled.BatteryChargingFull, "Bateria", Modifier.weight(1f), Good) { app.nav.go("test", "battery") }
-            ActionTile(Icons.Filled.Timer, "0–100", Modifier.weight(1f), Cyan) { app.nav.go("perf") }
-        }
+        AdaptiveGrid(listOf(
+            Triple(Icons.Filled.Warning, "Ler códigos") { app.nav.home(3); ObdManager.readDiagnostics() },
+            Triple(Icons.Filled.BatteryChargingFull, "Bateria") { app.nav.go("test", "battery") },
+            Triple(Icons.Filled.Timer, "0–100") { app.nav.go("perf") },
+        ), minCell = 96.dp, maxCols = 3) { (icon, label, action), m -> ActionTile(icon, label, m, onClick = action) }
 
         if (veh.supported.isNotEmpty()) {
             val all = Pids.ALL.filter { veh.has(it) }
             Section("Todos os sensores (${all.size})", icon = Icons.Filled.Sensors, trailing = {
-                TextButton(onClick = { showAll = !showAll }) { Text(if (showAll) "Esconder" else "Mostrar") }
+                TextButton(onClick = { showAll = !showAll }) { BtnLabel(if (showAll) "Esconder" else "Mostrar") }
             }) {
                 Column(Modifier.animateContentSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (showAll) {
@@ -496,9 +496,9 @@ private fun ConsumptionCard(v: Map<String, Double>, running: Boolean, profile: b
                 Hint(if (p.calibCount > 0) "calibrado · ${p.fuelLabel}" else "estimado · ${p.fuelLabel}")
             }
             Column(horizontalAlignment = Alignment.End) {
-                Text(
+                FitText(
                     when { !running -> "—"; cut -> "corte"; kmpl != null -> "%.1f km/L".format(kmpl); lph != null -> "%.2f L/h".format(lph); else -> "—" },
-                    style = Tabular, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = if (cut) Good else MaterialTheme.colorScheme.onSurface,
+                    Tabular.copy(fontSize = 24.sp, fontWeight = FontWeight.Bold), color = if (cut) Good else MaterialTheme.colorScheme.onSurface,
                 )
                 Hint(when { cut -> "sem injeção (desacelerando)"; kmpl != null && lph != null -> "%.2f L/h".format(lph); lph != null -> "parado em lenta"; else -> "" })
             }

@@ -93,7 +93,7 @@ fun VagScreen() {
             } else {
                 KeyValue("Protocolo", "${session!!.protocol} · ${session!!.baud} baud")
                 KeyValue("Key bytes", "%02X %02X".format(session!!.kw1, session!!.kw2))
-                OutlinedButton(onClick = { VagManager.disconnect() }) { Text("Desconectar") }
+                OutlinedButton(onClick = { VagManager.disconnect() }) { BtnLabel("Desconectar") }
             }
         }
 

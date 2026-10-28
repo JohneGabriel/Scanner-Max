@@ -83,7 +83,7 @@ fun VehicleScreen(app: AppActions) {
     if (v == null) {
         ScreenColumn {
             EmptyState(Icons.Filled.DirectionsCar, "Nenhum carro ainda", "Conecte ao carro uma vez: o app lê o chassi, identifica o modelo e cria o perfil sozinho.") {
-                Button(onClick = app.onConnect) { Text("Conectar") }
+                Button(onClick = app.onConnect) { BtnLabel("Conectar") }
             }
         }
         return
@@ -158,8 +158,8 @@ fun VehicleScreen(app: AppActions) {
             Step(3, "Encha de novo e informe quantos litros entraram. O app compara com a estimativa e se ajusta.")
             v.rawSinceFull?.let { KeyValue("Estimado desde a última marcação", "${Reports.num(it * v.calib, 2)} L") }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(onClick = { Garage.markFull(); Feedback.success() }, Modifier.weight(1f)) { Text("Enchi o tanque") }
-                FilledTonalButton(onClick = { calibDialog = true }, Modifier.weight(1f), enabled = (v.rawSinceFull ?: 0.0) > 0.5) { Text("Informar litros") }
+                OutlinedButton(onClick = { Garage.markFull(); Feedback.success() }, Modifier.weight(1f)) { BtnLabel("Enchi o tanque") }
+                FilledTonalButton(onClick = { calibDialog = true }, Modifier.weight(1f), enabled = (v.rawSinceFull ?: 0.0) > 0.5) { BtnLabel("Informar litros") }
             }
         }
         if (all.size > 1) Section("Outros carros", icon = Icons.Filled.DirectionsCar) {
@@ -183,7 +183,7 @@ fun VehicleScreen(app: AppActions) {
                 calibDialog = false
                 if (k != null) Feedback.success()
             }) { Text("Calibrar") } },
-            dismissButton = { TextButton(onClick = { calibDialog = false }) { Text("Cancelar") } },
+            dismissButton = { TextButton(onClick = { calibDialog = false }) { BtnLabel("Cancelar") } },
         )
     }
 }
@@ -250,14 +250,14 @@ fun AdapterScreen(app: AppActions) {
         }
         Section("Teste completo do adaptador", icon = Icons.Filled.Science) {
             Hint("Mede tudo o que o adaptador e o carro aceitam: módulos, PIDs, velocidade, monitoramento. Leva até 1 minuto. Só leitura.")
-            FilledTonalButton(onClick = { ObdManager.runProbe() }, enabled = connected && busy == null) { Text("Rodar teste completo") }
+            FilledTonalButton(onClick = { ObdManager.runProbe() }, enabled = connected && busy == null) { BtnLabel("Rodar teste completo") }
             report?.let {
-                TextButton(onClick = { showReport = !showReport }) { Text(if (showReport) "Esconder relatório" else "Ver relatório") }
+                TextButton(onClick = { showReport = !showReport }) { BtnLabel(if (showReport) "Esconder relatório" else "Ver relatório") }
                 AnimatedVisibility(showReport) { Mono(it) }
             }
         }
-        if (connected) OutlinedButton(onClick = { ObdManager.disconnect() }, Modifier.fillMaxWidth()) { Text("Desconectar") }
-        else Button(onClick = app.onConnect, Modifier.fillMaxWidth()) { Text("Conectar") }
+        if (connected) OutlinedButton(onClick = { ObdManager.disconnect() }, Modifier.fillMaxWidth()) { BtnLabel("Desconectar") }
+        else Button(onClick = app.onConnect, Modifier.fillMaxWidth()) { BtnLabel("Conectar") }
     }
 }
 
@@ -325,8 +325,8 @@ fun CustomizeScreen() {
             ToggleRow("Vibração", prefs.haptics) { on -> Settings.update { it.copy(haptics = on) }; if (on) Feedback.tick() }
             ToggleRow("Sons", prefs.sounds) { on -> Settings.update { it.copy(sounds = on) }; if (on) Feedback.success() }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { Feedback.success() }) { Text("Testar ok") }
-                OutlinedButton(onClick = { Feedback.warning() }) { Text("Testar alerta") }
+                OutlinedButton(onClick = { Feedback.success() }) { BtnLabel("Testar ok") }
+                OutlinedButton(onClick = { Feedback.warning() }) { BtnLabel("Testar alerta") }
             }
         }
     }

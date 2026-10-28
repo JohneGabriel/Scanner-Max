@@ -128,7 +128,7 @@ fun FlexScreen() {
                 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background((if (better) Good else Accent).copy(alpha = 0.14f)).padding(20.dp),
                     horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Abasteça com", style = MaterialTheme.typography.titleSmall)
-                    Text(if (better) "ETANOL" else "GASOLINA", fontSize = 38.sp, fontWeight = FontWeight.Bold, color = if (better) Good else Accent)
+                    FitText(if (better) "ETANOL" else "GASOLINA", MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Bold), color = if (better) Good else Accent)
                     Text("O etanol custa %.0f%% da gasolina (limite: %.0f%%).".format(pct * 100, ratio * 100), textAlign = TextAlign.Center)
                 }
             }
@@ -177,7 +177,7 @@ fun PerfScreen(app: AppActions) {
                     PerfState.Phase.RUNNING -> "MEDINDO"
                     PerfState.Phase.DONE -> "CONCLUÍDO"
                 }, style = MaterialTheme.typography.titleMedium, color = color, fontWeight = FontWeight.Bold)
-                Text("%.2f s".format(s.elapsed), style = Tabular, fontSize = 56.sp, fontWeight = FontWeight.Bold)
+                FitText("%.2f s".format(s.elapsed), Tabular.copy(fontSize = 56.sp, fontWeight = FontWeight.Bold))
                 Text("${s.speed?.toInt() ?: "—"} km/h · %.1f leituras/s".format(s.sampleHz), style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -189,8 +189,8 @@ fun PerfScreen(app: AppActions) {
                 if (s.trace.size >= 2) LineChart(s.trace.map { it.second }, min = 0.0, max = 110.0, color = Accent, height = 100)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(onClick = { PerfRunner.stop() }, Modifier.weight(1f)) { Text(if (s.phase == PerfState.Phase.DONE) "Fechar" else "Cancelar") }
-                if (s.phase == PerfState.Phase.DONE) Button(onClick = { PerfRunner.stop(); PerfRunner.start() }, Modifier.weight(1f)) { Text("De novo") }
+                OutlinedButton(onClick = { PerfRunner.stop() }, Modifier.weight(1f)) { BtnLabel(if (s.phase == PerfState.Phase.DONE) "Fechar" else "Cancelar") }
+                if (s.phase == PerfState.Phase.DONE) Button(onClick = { PerfRunner.stop(); PerfRunner.start() }, Modifier.weight(1f)) { BtnLabel("De novo") }
             }
         }
         if (best.isNotEmpty()) Section("Seus melhores tempos", icon = Icons.Filled.Speed) {
@@ -216,7 +216,7 @@ fun MaintenanceScreen() {
                 OutlinedTextField(odoText, { odoText = it.filter(Char::isDigit).take(7) }, Modifier.weight(1f), singleLine = true,
                     label = { Text("km") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), shape = RoundedCornerShape(14.dp))
                 Spacer(Modifier.width(10.dp))
-                FilledTonalButton(onClick = { odoText.toDoubleOrNull()?.let { Maintenance.setOdometer(it) } }) { Text("Salvar") }
+                FilledTonalButton(onClick = { odoText.toDoubleOrNull()?.let { Maintenance.setOdometer(it) } }) { BtnLabel("Salvar") }
             }
             odo?.let { Hint("Estimado agora: ${it.toInt()} km · ${veh?.name ?: ""}") }
         }
@@ -261,7 +261,7 @@ fun MaintenanceScreen() {
                 Maintenance.setLast(i.id, last.toDoubleOrNull())
                 edit = null
             }) { Text("Salvar") } },
-            dismissButton = { TextButton(onClick = { edit = null }) { Text("Cancelar") } },
+            dismissButton = { TextButton(onClick = { edit = null }) { BtnLabel("Cancelar") } },
         )
     }
 }
@@ -309,9 +309,9 @@ fun LogScreen(app: AppActions) {
             Hint("Tudo o que o app conversou com o adaptador nesta sessão. Exporte e anexe ao reportar um problema.")
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(onClick = { app.share(ObdManager.exportLogFile(), "text/plain") }) {
-                    Icon(Icons.Filled.Share, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Exportar log")
+                    Icon(Icons.Filled.Share, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); BtnLabel("Exportar log")
                 }
-                OutlinedButton(onClick = { Support.bug(app) }) { Text("Reportar") }
+                OutlinedButton(onClick = { Support.bug(app) }) { BtnLabel("Reportar") }
             }
         }
         Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceContainer).padding(12.dp)) {

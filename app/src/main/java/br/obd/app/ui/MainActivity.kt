@@ -271,7 +271,8 @@ private fun AppRoot() {
                             },
                             title = {
                                 Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                    Text(if (page != null) pageTitle(page) else "Scanner-Max", style = MaterialTheme.typography.titleLarge, maxLines = 1)
+                                    Text(if (page != null) pageTitle(page) else "Scanner-Max", style = MaterialTheme.typography.titleLarge, maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                                     if (page == null) {
                                         val pillColor = when {
                                             busy != null -> Accent
@@ -304,7 +305,7 @@ private fun AppRoot() {
                                 NavigationBarItem(
                                     selected = nav.tab == i, onClick = { if (nav.tab != i) br.obd.app.Feedback.tick(); nav.tab = i },
                                     icon = { Icon(t.icon, null) },
-                                    label = { Text(t.label, maxLines = 1, fontSize = 11.sp) },
+                                    label = { Text(t.label, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, fontSize = 11.sp) },
                                     colors = NavigationBarItemDefaults.colors(
                                         selectedIconColor = Accent, selectedTextColor = Accent,
                                         indicatorColor = MaterialTheme.colorScheme.primaryContainer,

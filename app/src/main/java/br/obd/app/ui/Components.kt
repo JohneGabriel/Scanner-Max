@@ -16,7 +16,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -45,7 +49,9 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -53,6 +59,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -72,7 +79,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.isUnspecified
 import androidx.compose.ui.unit.sp
 import br.obd.app.Level
 import br.obd.app.Settings
@@ -163,7 +174,10 @@ fun ScannerTheme(content: @Composable () -> Unit) {
         surfaceContainerLow = p.surface, surfaceContainerLowest = p.bg,
         outline = p.outline, outlineVariant = p.highest, error = Bad,
     )
-    MaterialTheme(colorScheme = scheme, typography = AppTypography, content = content)
+    val d = LocalDensity.current
+    CompositionLocalProvider(LocalDensity provides Density(d.density, d.fontScale.coerceIn(0.85f, 1.12f))) {
+        MaterialTheme(colorScheme = scheme, typography = AppTypography, content = content)
+    }
 }
 
 private fun Color.compositeOver(bg: Color): Color {
@@ -268,16 +282,17 @@ fun Gauge(
                 }
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
+                FitText(
                     value?.let { "%.${digits}f".format(it) } ?: "—",
-                    style = Tabular, fontSize = 38.sp, fontWeight = FontWeight.Bold,
+                    Tabular.copy(fontSize = 38.sp, fontWeight = FontWeight.Bold),
+                    Modifier.padding(horizontal = 18.dp),
                     color = if (hot) Bad else MaterialTheme.colorScheme.onSurface,
                 )
-                Text(unit, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(unit, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
             }
             Text(
                 label.uppercase(), Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp),
-                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
             )
         }
     }
@@ -361,8 +376,8 @@ fun StatCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Spacer(Modifier.height(4.dp))
-            Text(value, style = Tabular, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = c, maxLines = 1)
-            if (sub != null) Text(sub, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+            FitText(value, Tabular.copy(fontSize = 20.sp, fontWeight = FontWeight.SemiBold), color = c)
+            if (sub != null) Text(sub, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -371,7 +386,7 @@ fun StatCard(
 @Composable
 fun IconBadge(icon: ImageVector, color: Color = Accent, size: Int = 28) {
     Box(
-        Modifier.size(size.dp).clip(RoundedCornerShape((size * 0.3).dp)).background(color.copy(alpha = 0.16f)),
+        Modifier.size(size.dp).clip(RoundedCornerShape((size * 0.32).dp)).background(color.copy(alpha = 0.12f)),
         contentAlignment = Alignment.Center,
     ) { Icon(icon, null, Modifier.size((size * 0.58).dp), tint = color) }
 }
@@ -387,8 +402,8 @@ fun Section(
 ) {
     AppCard(modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            if (icon != null) { IconBadge(icon); Spacer(Modifier.width(10.dp)) }
-            Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            if (icon != null) { Icon(icon, null, Modifier.size(18.dp), tint = Accent); Spacer(Modifier.width(10.dp)) }
+            Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             trailing?.invoke()
         }
         content()
@@ -400,12 +415,14 @@ fun Section(
 fun ActionTile(icon: ImageVector, label: String, modifier: Modifier = Modifier, color: Color = Accent, sub: String? = null, onClick: () -> Unit) {
     Column(
         modifier.clip(RoundedCornerShape(18.dp)).background(MaterialTheme.colorScheme.surfaceContainer)
-            .pressable(onClick = onClick).padding(horizontal = 10.dp, vertical = 14.dp),
+            .border(BorderStroke(1.dp, Hairline), RoundedCornerShape(18.dp))
+            .pressable(onClick = onClick).padding(horizontal = 8.dp, vertical = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
     ) {
-        IconBadge(icon, color, 40)
-        Text(label, style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center, maxLines = 2)
+        IconBadge(icon, color, 38)
+        Text(label, style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center, maxLines = 2,
+            overflow = TextOverflow.Ellipsis, lineHeight = 16.sp)
         if (sub != null) Text(sub, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center, maxLines = 1)
     }
@@ -421,8 +438,9 @@ fun MenuRow(icon: ImageVector, title: String, sub: String? = null, color: Color 
         IconBadge(icon, color, 36)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-            if (sub != null) Hint(sub)
+            Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (sub != null) Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
         trailing?.invoke()
     }
@@ -461,7 +479,7 @@ fun StatusPill(text: String, color: Color, modifier: Modifier = Modifier) {
     ) {
         Box(Modifier.size(7.dp).clip(CircleShape).background(color))
         Spacer(Modifier.width(6.dp))
-        Text(text, style = MaterialTheme.typography.labelMedium, color = color, maxLines = 1)
+        Text(text, style = MaterialTheme.typography.labelMedium, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -629,3 +647,64 @@ fun Step(n: Int, text: String, color: Color = Accent) {
 
 /** Formatação curta de números (com unidade) e "—" quando não há valor. */
 fun fmt(v: Double?, pattern: String = "%.0f", unit: String = "") = v?.let { pattern.format(it) + unit } ?: "—"
+
+
+// ------------------------------------------------------------------ responsivo
+
+/**
+ * Texto de uma linha que diminui a fonte até caber na largura disponível, em vez de
+ * quebrar no meio da palavra. Usado em números, botões e títulos curtos.
+ */
+@Composable
+fun FitText(
+    text: String,
+    style: TextStyle,
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified,
+    minScale: Float = 0.55f,
+    textAlign: TextAlign? = null,
+) {
+    var scale by remember(text.length, style.fontSize) { mutableFloatStateOf(1f) }
+    var ready by remember(text.length, style.fontSize) { mutableStateOf(false) }
+    Text(
+        text,
+        modifier.drawWithContent { if (ready) drawContent() },
+        color = color,
+        style = if (style.fontSize.isUnspecified) style else style.copy(fontSize = style.fontSize * scale),
+        maxLines = 1,
+        softWrap = false,
+        textAlign = textAlign,
+        onTextLayout = { r ->
+            if (r.hasVisualOverflow && scale > minScale) scale = (scale * 0.9f).coerceAtLeast(minScale) else ready = true
+        },
+    )
+}
+
+/** Rótulo de botão: uma linha, encolhe se precisar. */
+@Composable
+fun BtnLabel(text: String) = FitText(text, MaterialTheme.typography.labelLarge)
+
+/**
+ * Grade que escolhe o número de colunas pela largura da tela (celular estreito, comum,
+ * dobrável, tablet) e deixa as células da mesma linha com a mesma altura.
+ */
+@Composable
+fun <T> AdaptiveGrid(
+    items: List<T>,
+    minCell: Dp = 104.dp,
+    maxCols: Int = 4,
+    spacing: Dp = 10.dp,
+    cell: @Composable (T, Modifier) -> Unit,
+) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val cols = ((maxWidth + spacing) / (minCell + spacing)).toInt().coerceIn(1, maxCols)
+        Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
+            items.chunked(cols).forEach { row ->
+                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(spacing)) {
+                    row.forEach { cell(it, Modifier.weight(1f).fillMaxHeight()) }
+                    repeat(cols - row.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
+        }
+    }
+}

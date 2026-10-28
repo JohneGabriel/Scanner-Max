@@ -111,7 +111,7 @@ fun DiagnosticsScreen(app: AppActions) {
             Button(onClick = { ObdManager.readDiagnostics() }, enabled = connected && busy == null, modifier = Modifier.fillMaxWidth()) {
                 Text(if (!connected) "Conecte para ler" else if (d.readAt == null) "Ler diagnóstico" else "Ler de novo")
             }
-            if (!connected) TextButton(onClick = app.onConnect) { Text("Conectar agora") }
+            if (!connected) TextButton(onClick = app.onConnect) { BtnLabel("Conectar agora") }
         }
 
         if (total > 0) {
@@ -119,7 +119,7 @@ fun DiagnosticsScreen(app: AppActions) {
                 stored.forEach { DtcRow(it, true) { app.nav.go("dtc", it) } }
                 pending.forEach { DtcRow(it, false) { app.nav.go("dtc", it) } }
                 Hint("Toque num código para ver o que significa, as causas e o que fazer.")
-                OutlinedButton(onClick = { confirmClear = true }, enabled = connected && busy == null) { Text("Apagar códigos") }
+                OutlinedButton(onClick = { confirmClear = true }, enabled = connected && busy == null) { BtnLabel("Apagar códigos") }
             }
         } else if (d.readAt != null) {
             Callout("A central não tem nenhum código registrado. Se o carro tem um sintoma, os testes guiados ajudam a achar a causa.", Tone.GOOD)
@@ -190,7 +190,7 @@ fun DiagnosticsScreen(app: AppActions) {
 
         Section("Zerar adaptação (modo 04)", icon = Icons.Filled.Refresh) {
             Hint("Única escrita que o OBD genérico aceita. Apaga códigos e prontidão; em algumas centrais também zera o aprendizado de combustível. O app mede a correção longa antes e depois.")
-            OutlinedButton(onClick = { confirmReset = true }, enabled = connected && busy == null) { Text("Tentar zerar a adaptação") }
+            OutlinedButton(onClick = { confirmReset = true }, enabled = connected && busy == null) { BtnLabel("Tentar zerar a adaptação") }
             reset?.let { Callout(it, if (it.contains("zerada")) Tone.GOOD else Tone.INFO) }
         }
     }
@@ -199,15 +199,15 @@ fun DiagnosticsScreen(app: AppActions) {
         onDismissRequest = { confirmClear = false },
         title = { Text("Apagar códigos?") },
         text = { Text("Apaga os códigos, a luz de injeção, o freeze frame e os monitores de prontidão. Se o defeito continuar, o código volta. Antes de uma vistoria, os monitores precisam de alguns dias rodando para ficarem prontos de novo.") },
-        confirmButton = { TextButton(onClick = { confirmClear = false; ObdManager.clearDtcs() }) { Text("Apagar") } },
-        dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancelar") } },
+        confirmButton = { TextButton(onClick = { confirmClear = false; ObdManager.clearDtcs() }) { BtnLabel("Apagar") } },
+        dismissButton = { TextButton(onClick = { confirmClear = false }) { BtnLabel("Cancelar") } },
     )
     if (confirmReset) AlertDialog(
         onDismissRequest = { confirmReset = false },
         title = { Text("Zerar adaptação?") },
         text = { Text("O modo 04 apaga os códigos, o freeze frame e os monitores de prontidão. Não grava nada além disso.") },
-        confirmButton = { TextButton(onClick = { confirmReset = false; ObdManager.resetAdaptation() }) { Text("Continuar") } },
-        dismissButton = { TextButton(onClick = { confirmReset = false }) { Text("Cancelar") } },
+        confirmButton = { TextButton(onClick = { confirmReset = false; ObdManager.resetAdaptation() }) { BtnLabel("Continuar") } },
+        dismissButton = { TextButton(onClick = { confirmReset = false }) { BtnLabel("Cancelar") } },
     )
 }
 
@@ -258,10 +258,10 @@ fun DtcScreen(code: String, app: AppActions) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(onClick = { app.openUrl(DtcGuide.searchUrl(det.code, vehicleQuery)) }, Modifier.weight(1f),
                 contentPadding = ButtonDefaults.ButtonWithIconContentPadding) {
-                Icon(Icons.Filled.Search, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Pesquisar")
+                Icon(Icons.Filled.Search, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); BtnLabel("Pesquisar")
             }
             OutlinedButton(onClick = { app.openUrl(DtcGuide.videoUrl(det.code, vehicleQuery)) }, Modifier.weight(1f)) {
-                Icon(Icons.Filled.OndemandVideo, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Vídeos")
+                Icon(Icons.Filled.OndemandVideo, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); BtnLabel("Vídeos")
             }
         }
         vehicleQuery?.let { Hint("A pesquisa inclui \"$it\" para achar resultados do seu carro.") }

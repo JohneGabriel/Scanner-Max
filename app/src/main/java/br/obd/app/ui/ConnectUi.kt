@@ -86,7 +86,7 @@ fun ConnectScreen(app: AppActions) {
         if (!granted) {
             Section("Permissão do Bluetooth", icon = Icons.Filled.Bluetooth) {
                 Hint("O Android pede autorização para o app ver e conectar ao adaptador. Nada é enviado para fora do aparelho.")
-                Button(onClick = { launcher.launch(Permissions.bluetoothList()) }) { Text("Permitir") }
+                Button(onClick = { launcher.launch(Permissions.bluetoothList()) }) { BtnLabel("Permitir") }
                 TextButton(onClick = {
                     ctx.startActivity(Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS,
                         android.net.Uri.fromParts("package", ctx.packageName, null)))
@@ -121,7 +121,7 @@ fun ConnectScreen(app: AppActions) {
                 TextButton(onClick = { showAll = !showAll }) { Text(if (showAll) "Esconder outros aparelhos" else "Mostrar outros ${others.size} aparelhos") }
                 AnimatedVisibility(showAll) { Column { others.forEach { DeviceRow(it) { t -> go(t) } } } }
             }
-            TextButton(onClick = { ctx.startActivity(Intent(AndroidSettings.ACTION_BLUETOOTH_SETTINGS)) }) { Text("Parear um adaptador novo") }
+            TextButton(onClick = { ctx.startActivity(Intent(AndroidSettings.ACTION_BLUETOOTH_SETTINGS)) }) { BtnLabel("Parear um adaptador novo") }
         }
 
         // ---------------- BLE
@@ -134,8 +134,8 @@ fun ConnectScreen(app: AppActions) {
             OutlinedTextField(host, { host = it.trim() }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Endereço:porta") },
                 shape = RoundedCornerShape(14.dp), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(onClick = { go(LinkTarget(LinkKind.WIFI, host, "Adaptador Wi-Fi")) }, enabled = !connecting) { Text("Conectar") }
-                TextButton(onClick = { ctx.startActivity(Intent(AndroidSettings.ACTION_WIFI_SETTINGS)) }) { Text("Abrir Wi-Fi") }
+                FilledTonalButton(onClick = { go(LinkTarget(LinkKind.WIFI, host, "Adaptador Wi-Fi")) }, enabled = !connecting) { BtnLabel("Conectar") }
+                TextButton(onClick = { ctx.startActivity(Intent(AndroidSettings.ACTION_WIFI_SETTINGS)) }) { BtnLabel("Abrir Wi-Fi") }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf("192.168.0.10:35000", "192.168.0.123:35000", "192.168.1.10:35000").forEach { h ->
@@ -150,7 +150,7 @@ fun ConnectScreen(app: AppActions) {
         Section("USB (OTG)", icon = Icons.Filled.Usb, trailing = { StatusPill(if (usb != null) "detectado" else "nada plugado", if (usb != null) Good else MaterialTheme.colorScheme.onSurfaceVariant) }) {
             Hint("ELM327 com cabo USB (FTDI, CH340, CP210x, PL2303). Cabos KKL da VW não são ELM327: use Menu → Central do fabricante.")
             usb?.let { KeyValue("Dispositivo", it) }
-            FilledTonalButton(onClick = { go(LinkTarget(LinkKind.USB, "usb", usb ?: "USB")) }, enabled = usb != null && !connecting) { Text("Conectar pelo USB") }
+            FilledTonalButton(onClick = { go(LinkTarget(LinkKind.USB, "usb", usb ?: "USB")) }, enabled = usb != null && !connecting) { BtnLabel("Conectar pelo USB") }
         }
 
         // ---------------- demo

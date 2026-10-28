@@ -192,10 +192,10 @@ fun TripDetailScreen(id: Long, app: AppActions) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(onClick = { app.share(Reports.trip(ObdManager.context, t, pts, profile), "application/pdf") }, Modifier.weight(1f),
                 contentPadding = ButtonDefaults.ButtonWithIconContentPadding) {
-                Icon(Icons.Filled.PictureAsPdf, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Relatório PDF")
+                Icon(Icons.Filled.PictureAsPdf, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); BtnLabel("Relatório PDF")
             }
             OutlinedButton(onClick = { app.share(TripStore.csv(id, File(ObdManager.context.cacheDir, "logs")), "text/csv") }, Modifier.weight(1f)) {
-                Icon(Icons.Filled.TableChart, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Planilha CSV")
+                Icon(Icons.Filled.TableChart, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); BtnLabel("Planilha CSV")
             }
         }
         if (pts.size >= 2) {
@@ -233,8 +233,8 @@ fun TripDetailScreen(id: Long, app: AppActions) {
     if (confirm) AlertDialog(
         onDismissRequest = { confirm = false },
         title = { Text("Apagar esta viagem?") },
-        confirmButton = { TextButton(onClick = { confirm = false; TripStore.delete(id); app.nav.back() }) { Text("Apagar") } },
-        dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancelar") } },
+        confirmButton = { TextButton(onClick = { confirm = false; TripStore.delete(id); app.nav.back() }) { BtnLabel("Apagar") } },
+        dismissButton = { TextButton(onClick = { confirm = false }) { BtnLabel("Cancelar") } },
     )
 }
 
