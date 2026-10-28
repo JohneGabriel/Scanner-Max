@@ -41,7 +41,11 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- atalhos ao segurar o ícone -->
+            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity>
+
+        <receiver android:name=".NotifReceiver" android:exported="false" />
 
         <service
             android:name=".ObdService"

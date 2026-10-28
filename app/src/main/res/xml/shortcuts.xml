@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="connect"
+        android:enabled="true"
+        android:icon="@drawable/ic_sc_connect"
+        android:shortcutShortLabel="@string/sc_connect_short"
+        android:shortcutLongLabel="@string/sc_connect_long">
+        <intent
+            android:action="br.obd.app.SHORTCUT"
+            android:targetPackage="br.obd.app"
+            android:targetClass="br.obd.app.ui.MainActivity">
+            <extra android:name="go" android:value="connect" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="codes"
+        android:enabled="true"
+        android:icon="@drawable/ic_sc_codes"
+        android:shortcutShortLabel="@string/sc_codes_short"
+        android:shortcutLongLabel="@string/sc_codes_long">
+        <intent
+            android:action="br.obd.app.SHORTCUT"
+            android:targetPackage="br.obd.app"
+            android:targetClass="br.obd.app.ui.MainActivity">
+            <extra android:name="go" android:value="codes" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="tests"
+        android:enabled="true"
+        android:icon="@drawable/ic_sc_tests"
+        android:shortcutShortLabel="@string/sc_tests_short"
+        android:shortcutLongLabel="@string/sc_tests_long">
+        <intent
+            android:action="br.obd.app.SHORTCUT"
+            android:targetPackage="br.obd.app"
+            android:targetClass="br.obd.app.ui.MainActivity">
+            <extra android:name="go" android:value="tests" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="hud"
+        android:enabled="true"
+        android:icon="@drawable/ic_sc_hud"
+        android:shortcutShortLabel="@string/sc_hud_short"
+        android:shortcutLongLabel="@string/sc_hud_long">
+        <intent
+            android:action="br.obd.app.SHORTCUT"
+            android:targetPackage="br.obd.app"
+            android:targetClass="br.obd.app.ui.MainActivity">
+            <extra android:name="go" android:value="hud" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="demo"
+        android:enabled="true"
+        android:icon="@drawable/ic_sc_demo"
+        android:shortcutShortLabel="@string/sc_demo_short"
+        android:shortcutLongLabel="@string/sc_demo_long">
+        <intent
+            android:action="br.obd.app.SHORTCUT"
+            android:targetPackage="br.obd.app"
+            android:targetClass="br.obd.app.ui.MainActivity">
+            <extra android:name="go" android:value="demo" />
+        </intent>
+    </shortcut>
+</shortcuts>

@@ -33,6 +33,10 @@ data class Prefs(
     val extraInit: String = "",
     /** Fala os alertas em voz alta. */
     val voice: Boolean = false,
+    /** Notificação fixa de acesso rápido (desconectado). */
+    val quickNotif: Boolean = true,
+    /** Lembretes periódicos e dicas. */
+    val reminders: Boolean = true,
 )
 
 object Settings {
@@ -53,6 +57,7 @@ object Settings {
             hiddenCards = s.getStringSet("hidden", emptySet())!!.toSet(),
             secondGauge = s.getString("gauge2", "speed")!!, onboarded = s.getBoolean("onboarded", false),
             forcedProtocol = s.getString("proto", "0")!!, extraInit = s.getString("extraInit", "")!!, voice = s.getBoolean("voice", false),
+            quickNotif = s.getBoolean("quickNotif", true), reminders = s.getBoolean("reminders", true),
         )
     }
 
@@ -65,7 +70,7 @@ object Settings {
             .putBoolean("alerts", p.alerts).putInt("coolantWarn", p.coolantWarn).putInt("redline", p.redline)
             .putInt("lowFuel", p.lowFuelPct).putStringSet("hidden", p.hiddenCards).putString("gauge2", p.secondGauge)
             .putBoolean("onboarded", p.onboarded).putString("proto", p.forcedProtocol).putString("extraInit", p.extraInit)
-            .putBoolean("voice", p.voice)
+            .putBoolean("voice", p.voice).putBoolean("quickNotif", p.quickNotif).putBoolean("reminders", p.reminders)
             .apply()
     }
 }

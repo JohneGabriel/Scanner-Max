@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="sc_connect_short">Conectar</string>
+    <string name="sc_connect_long">Conectar ao carro</string>
+    <string name="sc_codes_short">Ler códigos</string>
+    <string name="sc_codes_long">Ler códigos de falha</string>
+    <string name="sc_tests_short">Testes</string>
+    <string name="sc_tests_long">Testes guiados</string>
+    <string name="sc_hud_short">HUD</string>
+    <string name="sc_hud_long">Modo HUD</string>
+    <string name="sc_demo_short">Demonstração</string>
+    <string name="sc_demo_long">Modo demonstração</string>
+</resources>

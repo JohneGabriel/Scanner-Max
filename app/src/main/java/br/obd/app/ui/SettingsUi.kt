@@ -349,6 +349,8 @@ fun CustomizeScreen() {
         Section("Som e vibração", icon = Icons.Filled.Vibration) {
             ToggleRow("Vibração", prefs.haptics) { on -> Settings.update { it.copy(haptics = on) }; if (on) Feedback.tick() }
             ToggleRow("Sons", prefs.sounds) { on -> Settings.update { it.copy(sounds = on) }; if (on) Feedback.success() }
+            ToggleRow("Notificação fixa de acesso rápido", prefs.quickNotif) { on -> Settings.update { it.copy(quickNotif = on) } }
+            ToggleRow("Lembretes e dicas (até 1 por dia)", prefs.reminders) { on -> Settings.update { it.copy(reminders = on) } }
             ToggleRow("Falar os alertas em voz alta", prefs.voice) { on -> Settings.update { it.copy(voice = on) }; if (on) br.obd.app.Speech.say("Alertas por voz ligados") }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { Feedback.success() }) { BtnLabel("Testar ok") }

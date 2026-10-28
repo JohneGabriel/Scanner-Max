@@ -119,6 +119,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         ObdManager.init(this)
         ThemeState.apply(Settings.prefs.value.theme)
+        PendingGo.value = intent?.getStringExtra("go")
+        br.obd.app.ReminderWorker.opened(this)
         setContent {
             val prefs by Settings.prefs.collectAsState()
             LaunchedEffect(prefs.theme) {
@@ -139,9 +141,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        intent.getStringExtra("go")?.let { PendingGo.value = it }
+    }
+
     override fun onStart() { super.onStart(); ObdManager.setVisible(true) }
     override fun onStop() { ObdManager.setVisible(false); super.onStop() }
 }
+
+/** Tela pedida por um atalho do ícone ou por uma notificação. */
+object PendingGo { var value by mutableStateOf<String?>(null) }
 
 // ------------------------------------------------------------------ navegação
 
@@ -234,6 +244,24 @@ private fun AppRoot() {
             ObdManager.connect(t)
         }
     }
+    // atalhos do ícone e toques nas notificações
+    val go = PendingGo.value
+    LaunchedEffect(go, splash, prefs.onboarded) {
+        if (go == null || splash || !prefs.onboarded) return@LaunchedEffect
+        PendingGo.value = null
+        when (go) {
+            "connect" -> if (connected) nav.home(0) else nav.go("connect")
+            "codes" -> { nav.home(3); if (connected) ObdManager.readDiagnostics() }
+            "tests" -> nav.home(2)
+            "trips" -> nav.home(1)
+            "hud" -> nav.go("hud")
+            "maint" -> nav.go("maint")
+            "vehicle" -> nav.go("vehicle")
+            "demo" -> if (!connected) ObdManager.connect(br.obd.app.link.LinkTarget.DEMO)
+        }
+    }
+    LaunchedEffect(prefs.quickNotif) { br.obd.app.QuickNotif.refresh(context) }
+
     // um teste começou em outra tela: abre a tela dele
     val live by TestRunner.live.collectAsState()
     LaunchedEffect(live?.testId) {

@@ -269,6 +269,7 @@ object ObdManager {
         Feedback.start()
         startService()
         startHeartbeat()
+        QuickNotif.refresh(context)
         // primeira conexão com este carro: descobre o que ele oferece
         if (_vehicle.value.supported.isEmpty()) exclusive("Identificando o veículo…") { detectVehicle() }
         setLive(LiveMode.DASHBOARD)
@@ -342,6 +343,7 @@ object ObdManager {
         _connected.value = false
         _status.value = "Desconectado"
         stopService()
+        QuickNotif.refresh(context)
         if (_link.value?.kind == LinkKind.DEMO) {
             Garage.current.value?.id?.takeIf { it.startsWith("SMXDEMO") }?.let { Garage.delete(it) }
             beforeDemo?.let { Garage.select(it) }
