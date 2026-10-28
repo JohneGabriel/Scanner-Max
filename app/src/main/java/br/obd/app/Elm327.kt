@@ -30,6 +30,10 @@ class Elm327(private val log: (String) -> Unit) {
     @Volatile private var alive = false
     val isConnected get() = alive && socket?.isConnected == true
 
+    /** Hora do último comando trocado com o adaptador (para o keep-alive). */
+    @Volatile var lastIoAt = 0L
+        private set
+
     /** Último adaptador usado, para reconectar sem perguntar de novo. */
     var lastDevice: BluetoothDevice? = null
         private set
@@ -100,6 +104,7 @@ class Elm327(private val log: (String) -> Unit) {
                     Thread.sleep(2)
                 }
             }
+            lastIoAt = System.currentTimeMillis()
             val resp = clean(sb.toString())
             if (verbose) log("> $cmd  ←  ${resp.replace("\n", " | ")}")
             resp

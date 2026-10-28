@@ -234,6 +234,7 @@ object ObdManager {
         _connected.value = true
         _status.value = "Conectado"
         startService()
+        startHeartbeat()
         // primeira conexão com este carro: descobre o que ele oferece
         if (_vehicle.value.supported.isEmpty()) exclusive("Identificando o veículo…") { detectVehicle() }
         true
@@ -264,8 +265,36 @@ object ObdManager {
         context.stopService(Intent(context, ObdService::class.java))
     }
 
+    private var heartbeatJob: Job? = null
+
+    /**
+     * O ELM327 (ou o módulo Bluetooth dele) derruba o link depois de uns 20 s sem tráfego:
+     * no log, todo "Broken pipe" veio no primeiro comando depois de um silêncio. Com a tela
+     * parada, manda um ATRV (só lê a tensão, não mexe na linha do carro) a cada 3 s.
+     */
+    private fun startHeartbeat() {
+        if (heartbeatJob?.isActive == true) return
+        heartbeatJob = scope.launch {
+            while (isActive) {
+                delay(1000)
+                if (!_connected.value || _busy.value != null) continue
+                if (System.currentTimeMillis() - elm.lastIoAt < 3000) continue
+                try {
+                    val was = elm.verbose
+                    elm.verbose = false
+                    try { readBattery() } finally { elm.verbose = was }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    if (!elm.isConnected) reconnect()
+                }
+            }
+        }
+    }
+
     fun disconnect() {
         userDisconnected = true
+        heartbeatJob?.cancel(); heartbeatJob = null
         setLive(LiveMode.OFF)
         stopRecording()
         elm.close()
@@ -494,6 +523,7 @@ object ObdManager {
         _status.value = "Carro sem resposta — reabrindo a comunicação…"
         _values.value = emptyMap()
         while (currentCoroutineContext().isActive && _liveMode.value != LiveMode.OFF && elm.isConnected) {
+            if (_busy.value != null) { delay(500); continue }
             elm.send("ATPC")
             val r = elm.send("0100", timeoutMs = 10_000).replace(" ", "")
             if (r.contains("4100")) {
@@ -544,12 +574,14 @@ object ObdManager {
         scope.launch {
             _busy.value = label
             try {
+                if (!elm.isConnected && !reconnect()) return@launch
                 block()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: IOException) {
                 log("Falhou: ${e.message}")
-                reconnect()
+                _busy.value = "A conexão caiu — reconectando…"
+                if (reconnect()) _status.value = "Reconectado. A operação foi interrompida: rode de novo."
             } catch (e: Exception) {
                 log("Falhou: ${e.message}")
                 _status.value = "Erro: ${e.message}"
