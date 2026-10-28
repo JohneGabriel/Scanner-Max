@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ShowChart
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Thermostat
@@ -56,6 +57,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -76,6 +78,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import br.obd.app.DtcInfo
+import br.obd.app.IdleResult
+import br.obd.app.Stats
 import br.obd.app.ObdManager
 import br.obd.app.Pids
 import java.io.File
@@ -390,6 +394,8 @@ fun DiagnosticsScreen(onConnect: () -> Unit) {
                 Text(if (d.readAt == null) "Ler diagnóstico" else "Ler de novo")
             }
         }
+        IdleSection(busy)
+
         if (d.readAt == null) return@Screen
 
         if (total > 0) {
@@ -457,6 +463,91 @@ fun DiagnosticsScreen(onConnect: () -> Unit) {
             confirmButton = { TextButton(onClick = { confirmClear = false; ObdManager.clearDtcs() }) { Text("Apagar") } },
             dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancelar") } },
         )
+    }
+}
+
+// -------------------------------------------------------------- marcha lenta
+
+private val idleLabels = listOf("Tubo do cânister solto", "Tubo conectado", "Ar ligado", "Como está agora")
+
+@Composable
+private fun IdleSection(busy: String?) {
+    val runs by ObdManager.idleRuns.collectAsState()
+    var label by remember { mutableStateOf(idleLabels[0]) }
+
+    Section("Teste de marcha lenta", icon = Icons.Filled.Speed, trailing = {
+        if (runs.isNotEmpty()) TextButton(onClick = { ObdManager.clearIdleRuns() }) { Text("Limpar") }
+    }) {
+        Hint("Motor quente, parado, sem acelerar. Escolha a situação e rode 45 s; depois mude " +
+            "(ex.: reconecte o tubo) e rode de novo para comparar. Se o motor morrer, o teste para e registra.")
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            idleLabels.forEach { l ->
+                FilterChip(selected = label == l, onClick = { label = l }, label = { Text(l) })
+            }
+        }
+        FilledTonalButton(onClick = { ObdManager.idleTest(label) }, enabled = busy == null) {
+            Text("Testar: $label")
+        }
+        runs.forEach { IdleCard(it) }
+        idleComparison(runs)?.let { (text, tone) -> Callout(text, tone) }
+    }
+}
+
+@Composable
+private fun IdleCard(r: IdleResult) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.background).padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(r.label, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            if (r.stalled) StatusPill("morreu em ${r.seconds}s", Bad)
+            else {
+                val unstable = (r.rpm?.std ?: 0.0) > 60
+                StatusPill(if (unstable) "instável" else "estável", if (unstable) Warn else Good)
+            }
+        }
+        fun s(x: Stats?, p: String, u: String) = x?.let { "${p.format(it.avg)}$u  (${p.format(it.min)}–${p.format(it.max)})" } ?: "—"
+        KeyValue("Rotação", s(r.rpm, "%.0f", " rpm"))
+        KeyValue("Oscilação da rotação", r.rpm?.let { "±%.0f rpm".format(it.std) } ?: "—",
+            r.rpm?.let { if (it.std > 60) Warn else null })
+        KeyValue("Coletor", s(r.map, "%.0f", " kPa"), r.map?.let { if (it.avg > 45) Warn else null })
+        KeyValue("Borboleta", s(r.throttle, "%.1f", "%"))
+        KeyValue("Avanço", s(r.advance, "%.1f", "°"))
+        r.coolant?.let { KeyValue("Temp. motor no início", "%.0f °C".format(it), if (it < 80) Cyan else null) }
+    }
+}
+
+/** Compara a primeira execução com "solto" e a última com "conectado" (se houver as duas). */
+private fun idleComparison(runs: List<IdleResult>): Pair<String, Tone>? {
+    if (runs.isEmpty()) return null
+    val last = runs.last()
+    val loose = runs.lastOrNull { it.label.contains("solto") }
+    val tight = runs.lastOrNull { it.label.contains("conectado") }
+    if (loose != null && tight != null) {
+        val dThr = (tight.throttle?.avg ?: 0.0) - (loose.throttle?.avg ?: 0.0)
+        val dRpm = (tight.rpm?.avg ?: 0.0) - (loose.rpm?.avg ?: 0.0)
+        val dMap = (tight.map?.avg ?: 0.0) - (loose.map?.avg ?: 0.0)
+        val worse = tight.stalled || dRpm < -80 || (tight.rpm?.std ?: 0.0) > (loose.rpm?.std ?: 0.0) + 30
+        val base = "Com o tubo conectado: borboleta %+.1f pontos, rotação %+.0f rpm, coletor %+.0f kPa. ".format(dThr, dRpm, dMap)
+        return when {
+            !worse -> base + "A lenta não piorou ao fechar a entrada de ar: a borboleta está dando conta sozinha." to Tone.GOOD
+            dThr >= 1.5 -> base + "A central ABRIU mais a borboleta e mesmo assim a lenta caiu: o ar não está passando " +
+                "como deveria. Aponta para problema físico (sujeira/obstrução no corpo de borboleta) ou sensor de " +
+                "posição lendo errado." to Tone.WARN
+            else -> base + "A central quase NÃO abriu a borboleta para compensar: ela acha que já está aberta o " +
+                "suficiente. Aponta para posição de repouso aprendida errada (falta de adaptação) ou limite de " +
+                "abertura — o caso que a adaptação com scanner VW resolve." to Tone.WARN
+        }
+    }
+    return when {
+        last.stalled -> "O motor morreu durante o teste (${last.seconds}s)." to Tone.BAD
+        (last.map?.avg ?: 0.0) > 45 && (last.throttle?.avg ?: 99.0) < 3 ->
+            "Coletor alto (%.0f kPa) com borboleta quase fechada (%.1f%%): está entrando ar por fora da borboleta. "
+                .format(last.map?.avg, last.throttle?.avg) +
+                "Com o tubo do cânister solto isso é esperado. Agora rode com o tubo conectado para comparar." to Tone.INFO
+        else -> "Rode a outra situação para comparar." to Tone.INFO
     }
 }
 

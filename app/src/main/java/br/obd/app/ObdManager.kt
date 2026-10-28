@@ -40,6 +40,30 @@ data class DiagState(
     val readAt: Long? = null,
 )
 
+/** Estatística simples de uma série de leituras. */
+data class Stats(val avg: Double, val min: Double, val max: Double, val std: Double) {
+    companion object {
+        fun of(v: List<Double>): Stats? {
+            if (v.isEmpty()) return null
+            val avg = v.average()
+            val std = kotlin.math.sqrt(v.sumOf { (it - avg) * (it - avg) } / v.size)
+            return Stats(avg, v.min(), v.max(), std)
+        }
+    }
+}
+
+data class IdleResult(
+    val label: String,
+    val seconds: Int,
+    val rpm: Stats?,
+    val map: Stats?,
+    val throttle: Stats?,
+    val advance: Stats?,
+    val coolant: Double?,
+    val stalled: Boolean,
+    val at: Long,
+)
+
 data class LambdaResult(
     val seconds: Int,
     val samples: Int,
@@ -93,6 +117,12 @@ object ObdManager {
 
     private val _diag = MutableStateFlow(DiagState())
     val diag: StateFlow<DiagState> = _diag.asStateFlow()
+
+    private val _idleRuns = MutableStateFlow<List<IdleResult>>(emptyList())
+    /** Testes de marcha lenta da sessão (o mais recente por último). */
+    val idleRuns: StateFlow<List<IdleResult>> = _idleRuns.asStateFlow()
+
+    fun clearIdleRuns() { _idleRuns.value = emptyList() }
 
     private val _lambda = MutableStateFlow<LambdaResult?>(null)
     val lambda: StateFlow<LambdaResult?> = _lambda.asStateFlow()
@@ -425,6 +455,46 @@ object ObdManager {
      * Teste da sonda lambda B1S1: lê só ela, o mais rápido possível, e conta quantas
      * vezes cruza 0,45 V. Uma sonda boa em malha fechada oscila sem parar entre ~0,1 e ~0,9 V.
      */
+    /**
+     * Teste de marcha lenta: só rotação, coletor, borboleta e avanço, para comparar
+     * situações (tubo do cânister solto/conectado, ar ligado...). Para se o motor morrer.
+     */
+    fun idleTest(label: String, seconds: Int = 45) = exclusive("Marcha lenta: $label…") {
+        val coolant = elm.readPid("05")?.let(Pids.COOLANT.decode)
+        val rpm = ArrayList<Double>(); val map = ArrayList<Double>()
+        val thr = ArrayList<Double>(); val adv = ArrayList<Double>()
+        var stalled = false
+        var tick = 0
+        val start = System.currentTimeMillis()
+        val end = start + seconds * 1000L
+        elm.verbose = false
+        try {
+            while (System.currentTimeMillis() < end) {
+                val r = elm.readPid("0C", retries = 0)?.let(Pids.RPM.decode)
+                if (r != null) {
+                    rpm += r
+                    if (r < 250 && rpm.size > 3) { stalled = true; break }
+                }
+                when (tick % 3) {
+                    0 -> elm.readPid("0B", retries = 0)?.let(Pids.MAP.decode)?.let { map += it }
+                    1 -> elm.readPid("11", retries = 0)?.let(Pids.THROTTLE.decode)?.let { thr += it }
+                    2 -> elm.readPid("0E", retries = 0)?.let(Pids.ADVANCE.decode)?.let { adv += it }
+                }
+                tick++
+                val left = ((end - System.currentTimeMillis()) / 1000).coerceAtLeast(0)
+                _busy.value = "Marcha lenta: $label · ${left}s · ${r?.let { "%.0f rpm".format(it) } ?: "—"}"
+            }
+        } finally {
+            elm.verbose = true
+        }
+        val secs = ((System.currentTimeMillis() - start) / 1000).toInt()
+        val res = IdleResult(label, secs, Stats.of(rpm), Stats.of(map), Stats.of(thr), Stats.of(adv),
+            coolant, stalled, System.currentTimeMillis())
+        _idleRuns.update { (it + res).takeLast(6) }
+        log("Marcha lenta [$label]: ${rpm.size} leituras, rpm ${res.rpm}, coletor ${res.map}, " +
+            "borboleta ${res.throttle}, avanço ${res.advance}, morreu=$stalled")
+    }
+
     fun lambdaTest(seconds: Int = 30) = exclusive("Testando a sonda lambda ($seconds s)…") {
         val status = elm.readPid("03")?.getOrNull(0)
         val rpm = elm.readPid("0C")?.let(Pids.RPM.decode)
