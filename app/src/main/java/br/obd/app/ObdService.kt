@@ -105,7 +105,7 @@ class ObdService : Service() {
         val small = RemoteViews(packageName, R.layout.notif_small).apply {
             setImageViewBitmap(R.id.gauge, gauge)
             setTextViewText(R.id.rpm, rpmText)
-            setTextViewText(R.id.line, listOfNotNull(temp, speed, batt).joinToString("  ·  ").ifEmpty { state })
+            setTextViewText(R.id.line, listOfNotNull(temp, speed, batt).joinToString(" · ").ifEmpty { state })
             if (ltft != null) {
                 setTextViewText(R.id.badge, String.format(ptBr, "%+.1f%%", ltft))
                 setTextColor(R.id.badge, trimColor(ltft))
@@ -152,7 +152,6 @@ class ObdService : Service() {
             .setContentTitle(rpmText)
             .setContentText(state)
             .setSubText(state)
-            .setLargeIcon(gauge)
             .setStyle(NotificationCompat.DecoratedCustomViewStyle())
             .setCustomContentView(small)
             .setCustomBigContentView(big)
