@@ -75,6 +75,10 @@ class MainActivity : ComponentActivity() {
         ObdManager.init(this)
         setContent { ScannerTheme { AppRoot() } }
     }
+
+    // app fora da tela: continua lendo o básico para a notificação não ficar parada
+    override fun onStart() { super.onStart(); ObdManager.setVisible(true) }
+    override fun onStop() { ObdManager.setVisible(false); super.onStop() }
 }
 
 private data class Tab(val label: String, val icon: ImageVector)

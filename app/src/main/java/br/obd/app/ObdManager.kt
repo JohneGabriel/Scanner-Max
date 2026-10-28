@@ -37,6 +37,7 @@ data class DiagState(
     val freezeDtc: String? = null,
     val freeze: List<Pair<String, String>> = emptyList(),
     val mode06: List<Mode06Result> = emptyList(),
+    val mode06Can: List<Mode06Can> = emptyList(),
     val readAt: Long? = null,
 )
 
@@ -115,6 +116,10 @@ object ObdManager {
     private val _history = MutableStateFlow<List<Sample>>(emptyList())
     val history: StateFlow<List<Sample>> = _history.asStateFlow()
 
+    /** Quando a leitura ao vivo recebeu a última resposta (a notificação usa para saber se o dado é velho). */
+    @Volatile var lastLiveAt = 0L
+        private set
+
     private val _liveMode = MutableStateFlow(LiveMode.OFF)
     val liveMode: StateFlow<LiveMode> = _liveMode.asStateFlow()
 
@@ -143,6 +148,13 @@ object ObdManager {
 
     private val _resetResult = MutableStateFlow<String?>(null)
     val resetResult: StateFlow<String?> = _resetResult.asStateFlow()
+
+    private val _vehicle = MutableStateFlow(VehicleInfo())
+    /** Protocolo, PIDs suportados e chassi do carro conectado. */
+    val vehicle: StateFlow<VehicleInfo> = _vehicle.asStateFlow()
+
+    /** O carro aceita vários PIDs no mesmo pedido (só CAN). */
+    @Volatile private var multiPid = false
 
     private val _fuelType = MutableStateFlow<Int?>(null)
     val fuelType: StateFlow<Int?> = _fuelType.asStateFlow()
@@ -202,6 +214,8 @@ object ObdManager {
     @SuppressLint("MissingPermission")
     fun connect(device: BluetoothDevice) = scope.launch {
         userDisconnected = false
+        _vehicle.value = VehicleInfo()
+        _values.value = emptyMap()
         connectNow(device)
     }
 
@@ -220,7 +234,8 @@ object ObdManager {
         _connected.value = true
         _status.value = "Conectado"
         startService()
-        scope.launch { _fuelType.value = runCatching { elm.readPid("51")?.getOrNull(0) }.getOrNull() }
+        // primeira conexão com este carro: descobre o que ele oferece
+        if (_vehicle.value.supported.isEmpty()) exclusive("Identificando o veículo…") { detectVehicle() }
         true
     } catch (e: CancellationException) {
         throw e
@@ -276,17 +291,46 @@ object ObdManager {
 
     // ------------------------------------------------------------- leitura ao vivo
 
-    /** Cada item: PID e de quantos em quantos ciclos ele é lido (1 = sempre). */
-    private val dashboardPlan = listOf(
-        Pids.RPM to 1, Pids.SPEED to 2, Pids.THROTTLE to 2, Pids.LOAD to 4,
-        Pids.MAP to 6, Pids.ADVANCE to 8, Pids.COOLANT to 15, Pids.IAT to 15,
-    )
-    private val fuelPlan = listOf(
-        Pids.O2S1 to 1, Pids.STFT to 2, Pids.RPM to 3, Pids.O2S2 to 4,
-        Pids.LTFT to 6, Pids.FUEL_STATUS to 8, Pids.COOLANT to 15,
-    )
+    /**
+     * Plano de leitura: PID e de quantos em quantos ciclos ele é lido (1 = sempre).
+     * Só entram os PIDs que o carro suporta.
+     */
+    private fun plan(mode: LiveMode): List<Pair<PidDef, Int>> {
+        val v = _vehicle.value
+        fun ok(d: PidDef) = v.supported.isEmpty() || v.has(d)
+        val base = if (mode == LiveMode.FUEL) listOf(
+            (if (ok(Pids.O2S1) || !v.has(Pids.WB_LAMBDA)) Pids.O2S1 else Pids.WB_LAMBDA) to 1,
+            Pids.STFT to 2, Pids.RPM to 3, Pids.O2S2 to 4, Pids.LTFT to 6,
+            Pids.FUEL_STATUS to 8, Pids.COOLANT to 15,
+        ) else listOf(
+            Pids.RPM to 1, Pids.SPEED to 2, Pids.THROTTLE to 2, Pids.LOAD to 4, Pids.MAP to 6,
+            Pids.MAF to 6, Pids.ADVANCE to 8, Pids.COOLANT to 15, Pids.IAT to 15, Pids.FUEL_LEVEL to 30,
+        )
+        return base.filter { ok(it.first) }
+    }
+
+    /** Sensores fora do plano principal, lidos em rodízio para a lista "Todos os sensores". */
+    private fun extras(planDefs: Set<PidDef>): List<PidDef> {
+        val v = _vehicle.value
+        return Pids.ALL.filter { v.has(it) && it !in planDefs }
+    }
+
+    private var uiMode = LiveMode.OFF
+    private var appVisible = true
+
+    /** Chamado pela tela: com o app em segundo plano, mantém pelo menos o painel lendo. */
+    fun setVisible(visible: Boolean) {
+        appVisible = visible
+        applyLive()
+    }
 
     fun setLive(mode: LiveMode) {
+        uiMode = mode
+        applyLive()
+    }
+
+    private fun applyLive() {
+        val mode = if (!appVisible && uiMode == LiveMode.OFF && _connected.value) LiveMode.DASHBOARD else uiMode
         _liveMode.value = mode
         if (mode == LiveMode.OFF) {
             liveJob?.cancel(); liveJob = null; return
@@ -297,18 +341,32 @@ object ObdManager {
 
     private suspend fun liveLoop() {
         var tick = 0
+        var rot = 0
         var t0 = System.currentTimeMillis()
         var requests = 0
         var emptyCycles = 0
         while (currentCoroutineContext().isActive && _liveMode.value != LiveMode.OFF) {
             if (!_connected.value || _busy.value != null) { delay(250); continue }
-            val plan = if (_liveMode.value == LiveMode.FUEL) fuelPlan else dashboardPlan
+            val plan = plan(_liveMode.value)
             try {
+                val due = plan.filterIndexed { i, (_, every) -> tick % every == i % every }.map { it.first }.toMutableList()
+                // rodízio dos demais sensores: 1 por ciclo (2 em CAN, onde sobra velocidade)
+                if (_liveMode.value == LiveMode.DASHBOARD) {
+                    val ex = extras(plan.map { it.first }.toSet())
+                    if (ex.isNotEmpty()) repeat(if (multiPid) 2 else if (tick % 2 == 0) 1 else 0) {
+                        due += ex[rot++ % ex.size]
+                    }
+                }
                 var answered = 0
-                for ((def, every) in plan) {
-                    if (tick % every != (plan.indexOfFirst { it.first == def } % every)) continue
-                    if (readInto(def) != null) answered++
-                    requests++
+                if (multiPid) {
+                    // CAN: até 6 PIDs de tamanho fixo num pedido só
+                    val (fixed, variable) = due.partition { it.bytes > 0 }
+                    for (batch in fixed.chunked(6)) {
+                        answered += readBatch(batch); requests++
+                    }
+                    for (d in variable) { if (readInto(d) != null) answered++; requests++ }
+                } else {
+                    for (d in due) { if (readInto(d) != null) answered++; requests++ }
                 }
                 if (tick % 20 == 10) { readBattery(); requests++ }
                 tick++
@@ -319,8 +377,9 @@ object ObdManager {
                     t0 = now; requests = 0
                 }
                 // Ignição desligada e religada: o Bluetooth continua de pé (a tomada OBD tem
-                // 12 V direto), mas a sessão da linha K com a central morreu. Reabre.
-                emptyCycles = if (answered == 0) emptyCycles + 1 else 0
+                // 12 V direto), mas a sessão com a central morreu. Reabre.
+                if (answered > 0) lastLiveAt = now
+                emptyCycles = if (answered == 0 && due.isNotEmpty()) emptyCycles + 1 else 0
                 if (emptyCycles >= 3) {
                     recoverBus()
                     emptyCycles = 0
@@ -336,6 +395,97 @@ object ObdManager {
                 }
             }
         }
+    }
+
+    /** Lê vários PIDs num único pedido (CAN). Devolve quantos vieram. */
+    private suspend fun readBatch(batch: List<PidDef>): Int {
+        if (batch.size == 1) return if (readInto(batch[0]) != null) 1 else 0
+        val resp = elm.send("01" + batch.joinToString("") { it.pid })
+        val got = parseMulti(resp)
+        var n = 0
+        val upd = HashMap<String, Double>()
+        for (d in batch) {
+            val v = got[d.pidInt]?.let(d.decode) ?: continue
+            upd[d.key] = v; n++
+            if (d == Pids.LTFT) trackLtft(v)
+        }
+        if (upd.isNotEmpty()) _values.update { it + upd }
+        return n
+    }
+
+    /** Separa a resposta de um pedido agrupado em PID -> bytes. */
+    private fun parseMulti(resp: String): Map<Int, IntArray> {
+        val bytes = Elm327.joinFrames(resp).chunked(2).mapNotNull { it.toIntOrNull(16) }
+        val out = HashMap<Int, IntArray>()
+        var i = bytes.indexOf(0x41)
+        if (i < 0) return out
+        i++
+        while (i < bytes.size) {
+            val def = Pids.byPid[bytes[i]] ?: break
+            if (def.bytes == 0 || i + 1 + def.bytes > bytes.size) break
+            out[bytes[i]] = bytes.subList(i + 1, i + 1 + def.bytes).toIntArray()
+            i += 1 + def.bytes
+            if (i < bytes.size && bytes[i] == 0x41) i++ // resposta de outra central
+        }
+        return out
+    }
+
+    /** Descobre protocolo, PIDs suportados, chassi e tipo de combustível. */
+    private suspend fun detectVehicle() {
+        val dp = elm.send("ATDP").removePrefix("AUTO,").removePrefix("AUTO").trim()
+        val dpn = elm.send("ATDPN").removePrefix("A")
+        val can = dpn.firstOrNull() in listOf('6', '7', '8', '9', 'A', 'B', 'C')
+        val supported = HashSet<Int>()
+        var base = 0
+        while (base <= 0xE0) {
+            val pidHex = "%02X".format(base)
+            val resp = elm.send("01$pidHex", 4000)
+            if (Elm327.isError(resp)) break
+            var mask = 0L
+            var any = false
+            resp.lines().map { it.replace(" ", "").replace(Regex("^[0-9A-F]:"), "") }
+                .filter { it.startsWith("41$pidHex") }
+                .forEach { l ->
+                    val data = l.removePrefix("41$pidHex").take(8)
+                    if (data.length == 8) { mask = mask or data.toLong(16); any = true }
+                }
+            if (!any) break
+            for (i in 0 until 32) if (mask and (1L shl (31 - i)) != 0L) supported += base + i + 1
+            if (mask and 1L == 0L) break
+            base += 0x20
+        }
+        val vin = readVin()
+        val fuel = if (0x51 in supported) elm.readPid("51")?.getOrNull(0) else null
+        multiPid = can && runCatching {
+            parseMulti(elm.send("010C0D")).keys.containsAll(listOf(0x0C, 0x0D))
+        }.getOrDefault(false)
+        val info = VehicleInfo(protocolName(dp, dpn), can, supported, vin, fuel)
+        _vehicle.value = info
+        _fuelType.value = fuel
+        log("Veículo: ${info.maker ?: "fabricante ?"} ${info.year ?: ""} · ${info.protocol} · " +
+            "${supported.size} PIDs · VIN ${vin ?: "—"} · pedidos agrupados: ${if (multiPid) "sim" else "não"}")
+    }
+
+    private suspend fun readVin(): String? {
+        val resp = elm.send("0902", 5000)
+        if (Elm327.isError(resp)) return null
+        val hex = Elm327.joinFrames(resp).replace(Regex("4902[0-9A-F]{2}"), "")
+        val txt = hex.chunked(2).mapNotNull { it.toIntOrNull(16) }
+            .filter { it in 0x30..0x5A }.joinToString("") { it.toChar().toString() }
+        return txt.takeLast(17).takeIf { it.length == 17 }
+    }
+
+    private fun protocolName(dp: String, dpn: String) = when (dpn.firstOrNull()) {
+        '1' -> "J1850 PWM (Ford)"
+        '2' -> "J1850 VPW (GM)"
+        '3' -> "ISO 9141-2 (linha K)"
+        '4' -> "KWP2000 lento (linha K)"
+        '5' -> "KWP2000 rápido (linha K)"
+        '6' -> "CAN 11 bits 500 kbps"
+        '7' -> "CAN 29 bits 500 kbps"
+        '8' -> "CAN 11 bits 250 kbps"
+        '9' -> "CAN 29 bits 250 kbps"
+        else -> dp.ifBlank { "—" }
     }
 
     /** Fecha a sessão antiga com a central e refaz a inicialização até ela responder. */
@@ -420,8 +570,10 @@ object ObdManager {
         val ff = freezePid("02")
         if (ff != null && ff.size >= 2 && (ff[0] != 0 || ff[1] != 0)) {
             freezeDtc = Elm327.decodeDtc("%02X%02X".format(ff[0], ff[1]))
+            val v = _vehicle.value
             for (def in listOf(Pids.RPM, Pids.SPEED, Pids.COOLANT, Pids.LOAD, Pids.STFT, Pids.LTFT,
-                Pids.MAP, Pids.ADVANCE, Pids.IAT, Pids.THROTTLE, Pids.FUEL_STATUS)) {
+                Pids.MAP, Pids.MAF, Pids.ADVANCE, Pids.IAT, Pids.THROTTLE, Pids.FUEL_STATUS)
+                .filter { v.supported.isEmpty() || v.has(it) }) {
                 val d = freezePid(def.pid) ?: continue
                 val v = def.decode(d) ?: continue
                 val txt = if (def == Pids.FUEL_STATUS) Pids.fuelStatusText(v.toInt())
@@ -430,11 +582,13 @@ object ObdManager {
             }
         }
 
-        // modo 06: testes que a central faz nas sondas lambda
+        // modo 06: testes que a própria central faz (formato muda entre linha K e CAN)
         val m06 = mutableListOf<Mode06Result>()
-        for (tid in 1..8) m06 += mode06(tid)
+        val m06c = mutableListOf<Mode06Can>()
+        if (_vehicle.value.isCan) m06c += mode06Can()
+        else for (tid in 1..8) m06 += mode06(tid)
 
-        _diag.value = DiagState(stored, pending, readiness, freezeDtc, freeze, m06, System.currentTimeMillis())
+        _diag.value = DiagState(stored, pending, readiness, freezeDtc, freeze, m06, m06c, System.currentTimeMillis())
     }
 
     private suspend fun freezePid(pid: String): IntArray? {
@@ -455,6 +609,39 @@ object ObdManager {
             val (limit, _) = Mode06Result.scale(tid, b[3] * 256 + b[4])
             Mode06Result(tid, cid and 0x7F, value, limit, cid and 0x80 != 0, unit)
         }
+    }
+
+    /** Modo 06 no CAN: descobre os monitores (MIDs) suportados e lê os testes de cada um. */
+    private suspend fun mode06Can(): List<Mode06Can> {
+        val mids = ArrayList<Int>()
+        var base = 0
+        while (base <= 0xE0) {
+            val h = "%02X".format(base)
+            val bytes = Elm327.joinFrames(elm.send("06$h", 3000)).chunked(2).mapNotNull { it.toIntOrNull(16) }
+            val i = bytes.windowed(2).indexOfFirst { it[0] == 0x46 && it[1] == base }
+            if (i < 0 || i + 6 > bytes.size) break
+            val mask = (bytes[i + 2].toLong() shl 24) or (bytes[i + 3].toLong() shl 16) or
+                (bytes[i + 4].toLong() shl 8) or bytes[i + 5].toLong()
+            for (b in 0 until 32) if (mask and (1L shl (31 - b)) != 0L) mids += base + b + 1
+            if (mask and 1L == 0L) break
+            base += 0x20
+        }
+        val out = ArrayList<Mode06Can>()
+        for (mid in mids.filter { it % 0x20 != 0 }.take(40)) {
+            val bytes = Elm327.joinFrames(elm.send("06%02X".format(mid), 3000)).chunked(2).mapNotNull { it.toIntOrNull(16) }
+            var i = bytes.indexOf(0x46)
+            if (i < 0) continue
+            i++
+            // cada teste: MID TID UAS valor(2) mínimo(2) máximo(2)
+            while (i + 9 <= bytes.size && bytes[i] == mid) {
+                out += Mode06Can(
+                    mid, bytes[i + 1], bytes[i + 2],
+                    bytes[i + 3] * 256 + bytes[i + 4], bytes[i + 5] * 256 + bytes[i + 6], bytes[i + 7] * 256 + bytes[i + 8],
+                )
+                i += 9
+            }
+        }
+        return out
     }
 
     fun clearDtcs() = exclusive("Apagando códigos…") {
@@ -560,6 +747,14 @@ object ObdManager {
     }
 
     fun lambdaTest(seconds: Int = 30) = exclusive("Testando a sonda lambda ($seconds s)…") {
+        val veh = _vehicle.value
+        if (veh.supported.isNotEmpty() && !veh.has(Pids.O2S1)) {
+            _lambda.value = LambdaResult(0, 0, 0.0, 0.0, 0.0, 0.0, 0, false, null,
+                if (veh.has(Pids.WB_LAMBDA) || veh.has(Pids.WB_LAMBDA_I))
+                    "Este carro usa sonda de banda larga, que não oscila: o teste não se aplica. Acompanhe o lambda medido na tela."
+                else "Este carro não informa a tensão da sonda pelo OBD.")
+            return@exclusive
+        }
         val status = elm.readPid("03")?.getOrNull(0)
         val rpm = elm.readPid("0C")?.let(Pids.RPM.decode)
         val volts = ArrayList<Double>()

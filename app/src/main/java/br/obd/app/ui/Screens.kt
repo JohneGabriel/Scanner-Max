@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.LocalGasStation
 import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Refresh
@@ -134,28 +135,40 @@ fun DashboardScreen(onConnect: () -> Unit) {
     val history by ObdManager.history.collectAsState()
     val recording by ObdManager.recording.collectAsState()
     val rate by ObdManager.rate.collectAsState()
+    val veh by ObdManager.vehicle.collectAsState()
+    var showAll by remember { mutableStateOf(false) }
 
     Screen {
         if (!connected) { NotConnected(onConnect); return@Screen }
 
+        VehicleCard(veh)
+
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Gauge(v["rpm"], 7000.0, "Rotação", "rpm", Modifier.weight(1f), warnAt = 6000.0, majorStep = 1000.0)
+            val diesel = Pids.isDiesel(veh.fuelType)
+            Gauge(v["rpm"], if (diesel) 5000.0 else 7000.0, "Rotação", "rpm", Modifier.weight(1f),
+                warnAt = if (diesel) 4200.0 else 6000.0, majorStep = 1000.0)
             Gauge(v["speed"], 200.0, "Velocidade", "km/h", Modifier.weight(1f), majorStep = 20.0)
         }
 
+        // só os cartões que o carro suporta (antes de identificar, mostra os básicos)
+        fun has(d: br.obd.app.PidDef) = veh.supported.isEmpty() || veh.has(d)
         val coolant = v["coolant"]; val battery = v["battery"]
-        val cards = listOf(
-            Card4("Motor", fmt(coolant, unit = " °C"), Icons.Filled.Thermostat,
-                coolant?.let { if (it > 105) Bad else if (it < 70) Cyan else null }),
-            Card4("Carga", fmt(v["load"], unit = "%"), Icons.Filled.Equalizer, null),
-            Card4("Borboleta", fmt(v["throttle"], unit = "%"), Icons.Filled.Tune, null),
-            Card4("Admissão", fmt(v["iat"], unit = " °C"), Icons.Filled.Air, null),
-            Card4("Coletor", fmt(v["map"], unit = " kPa"), Icons.Filled.Compress, null),
-            Card4("Avanço", fmt(v["advance"], "%.1f", "°"), Icons.Filled.Bolt, null),
-        )
+        val cards = buildList {
+            if (has(Pids.COOLANT)) add(Card4("Motor", fmt(coolant, unit = " °C"), Icons.Filled.Thermostat,
+                coolant?.let { if (it > 105) Bad else if (it < 70) Cyan else null }))
+            if (has(Pids.LOAD)) add(Card4("Carga", fmt(v["load"], unit = "%"), Icons.Filled.Equalizer, null))
+            if (has(Pids.THROTTLE)) add(Card4("Borboleta", fmt(v["throttle"], unit = "%"), Icons.Filled.Tune, null))
+            if (has(Pids.IAT)) add(Card4("Admissão", fmt(v["iat"], unit = " °C"), Icons.Filled.Air, null))
+            if (has(Pids.MAP)) add(Card4("Coletor", fmt(v["map"], unit = " kPa"), Icons.Filled.Compress, null))
+            if (veh.has(Pids.MAF)) add(Card4("Fluxo de ar", fmt(v["maf"], "%.1f", " g/s"), Icons.Filled.Air, null))
+            if (has(Pids.ADVANCE)) add(Card4("Avanço", fmt(v["advance"], "%.1f", "°"), Icons.Filled.Bolt, null))
+            if (veh.has(Pids.FUEL_LEVEL)) add(Card4("Tanque", fmt(v["fuelLevel"], unit = "%"), Icons.Filled.LocalGasStation,
+                v["fuelLevel"]?.let { if (it < 12) Warn else null }))
+        }
         cards.chunked(3).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 row.forEach { StatCard(it.label, it.value, Modifier.weight(1f), it.color, it.icon) }
+                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
         StatCard(
@@ -170,10 +183,51 @@ fun DashboardScreen(onConnect: () -> Unit) {
         }) {
             val rpms = history.takeLast(200).map { it.rpm }
             LineChart(rpms, min = 0.0, max = maxOf(3000.0, (rpms.filterNotNull().maxOrNull() ?: 0.0) * 1.15))
-            Hint("Último minuto · ~%.1f leituras por segundo (limite da linha K)".format(rate))
+            Hint("Último minuto · ~%.1f leituras por segundo%s".format(rate,
+                if (veh.isCan) "" else if (veh.supported.isNotEmpty()) " (limite da linha K)" else ""))
+        }
+
+        if (veh.supported.isNotEmpty()) {
+            val all = Pids.ALL.filter { veh.has(it) }
+            Section("Todos os sensores (${all.size})", icon = Icons.Filled.Sensors, trailing = {
+                TextButton(onClick = { showAll = !showAll }) { Text(if (showAll) "Esconder" else "Mostrar") }
+            }) {
+                if (showAll) {
+                    all.forEach { d ->
+                        val value = v[d.key]
+                        KeyValue(d.label, when {
+                            value == null -> "…"
+                            d == Pids.FUEL_STATUS -> Pids.fuelStatusText(value.toInt())
+                            else -> d.format(value)
+                        })
+                    }
+                    Hint("Os sensores fora do painel são lidos em rodízio: cada um atualiza a cada poucos segundos.")
+                } else {
+                    Hint("Tudo o que este carro informa pelo OBD, incluindo o que não aparece no painel.")
+                }
+            }
         }
 
         TripCard(recording)
+    }
+}
+
+/** Fabricante, ano, protocolo e combustível do carro conectado. */
+@Composable
+private fun VehicleCard(veh: br.obd.app.VehicleInfo) {
+    if (veh.supported.isEmpty() && veh.vin == null) return
+    AppCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    listOfNotNull(veh.maker, veh.year?.toString()).joinToString(" · ").ifEmpty { "Veículo conectado" },
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Hint(listOfNotNull(veh.protocol, veh.fuelType?.let { Pids.fuelTypeText(it) }).joinToString(" · "))
+                veh.vin?.let { Hint("Chassi $it") }
+            }
+            StatusPill("${veh.supported.size} sensores", Cyan)
+        }
     }
 }
 
@@ -228,10 +282,19 @@ fun FuelScreen(onConnect: () -> Unit) {
     val fuelType by ObdManager.fuelType.collectAsState()
     val busy by ObdManager.busy.collectAsState()
     val stuck by ObdManager.ltftStuck.collectAsState()
+    val veh by ObdManager.vehicle.collectAsState()
     var confirmReset by remember { mutableStateOf(false) }
+    val flex = Pids.isFlex(fuelType)
+    val diesel = Pids.isDiesel(fuelType)
+    val narrowO2 = veh.supported.isEmpty() || veh.has(Pids.O2S1)
+    val wideO2 = veh.has(Pids.WB_LAMBDA) || veh.has(Pids.WB_LAMBDA_I)
 
     Screen {
         if (!connected) { NotConnected(onConnect); return@Screen }
+        if (diesel) {
+            Callout("Motor a diesel: as correções de mistura e a sonda lambda funcionam de outro jeito e a " +
+                "maioria dos carros a diesel não informa esses dados pelo OBD. Veja os sensores no Painel.", Tone.INFO)
+        }
 
         Section("Correções de combustível", icon = Icons.Filled.Tune) {
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -240,8 +303,9 @@ fun FuelScreen(onConnect: () -> Unit) {
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             KeyValue("Sistema", Pids.fuelStatusText(v["fuelStatus"]?.toInt()))
-            KeyValue("A central informa", Pids.fuelTypeText(fuelType))
-            val (advice, tone) = trimAdvice(v["ltft"], v["stft"])
+            if (fuelType != null) KeyValue("A central informa", Pids.fuelTypeText(fuelType))
+            v["ethanol"]?.let { KeyValue("Etanol no tanque (medido)", "%.0f%%".format(it)) }
+            val (advice, tone) = trimAdvice(v["ltft"], v["stft"], flex)
             Callout(advice, tone)
             if (stuck) {
                 Callout(
@@ -252,7 +316,7 @@ fun FuelScreen(onConnect: () -> Unit) {
             }
         }
 
-        Section("Sonda lambda", icon = Icons.Filled.Sensors) {
+        if (narrowO2) Section("Sonda lambda", icon = Icons.Filled.Sensors) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 StatCard("Antes do catalisador", fmt(v["o2s1"], "%.2f", " V"), Modifier.weight(1f))
                 StatCard("Depois do catalisador", fmt(v["o2s2"], "%.2f", " V"), Modifier.weight(1f))
@@ -261,8 +325,12 @@ fun FuelScreen(onConnect: () -> Unit) {
             Hint("Motor quente: a sonda de antes do catalisador deve subir e descer sem parar " +
                 "entre ~0,1 e ~0,9 V (linha tracejada = 0,45 V).")
         }
+        if (!narrowO2 && wideO2) Section("Sonda lambda (banda larga)", icon = Icons.Filled.Sensors) {
+            StatCard("Lambda medido", fmt(v["wbLambda"] ?: v["wbLambdaI"], "%.3f", " λ"), Modifier.fillMaxWidth())
+            Hint("Sonda de banda larga: mostra a mistura direto. 1,000 = mistura ideal; abaixo = rica; acima = pobre.")
+        }
 
-        Section("Teste da sonda", icon = Icons.Filled.Science) {
+        if (narrowO2) Section("Teste da sonda", icon = Icons.Filled.Science) {
             Hint("Lê só a sonda por 30 s e conta as oscilações. Motor quente, de preferência a ~2.000 rpm.")
             FilledTonalButton(onClick = { ObdManager.lambdaTest(30) }, enabled = busy == null) { Text("Testar sonda (30 s)") }
             lambda?.let { r ->
@@ -283,13 +351,13 @@ fun FuelScreen(onConnect: () -> Unit) {
             reset?.let { Callout(it, if (it.contains("zerada")) Tone.GOOD else Tone.INFO) }
         }
 
-        Section("Ajudar a central a reaprender", icon = Icons.Filled.Timeline) {
+        if (flex) Section("Ajudar a central a reaprender o combustível", icon = Icons.Filled.Timeline) {
             listOf(
-                "Abasteça bastante (pelo menos 1/4 do tanque): a central detecta o abastecimento pelo nível.",
+                "Abasteça bastante (pelo menos 1/4 do tanque): muitas centrais flex detectam o abastecimento pelo nível.",
                 "Rode 10 a 15 minutos em velocidade constante, motor quente.",
                 "Acompanhe aqui a correção longa: ela deve caminhar para perto de 0%.",
-                "Se ela não sair do lugar e a sonda estiver boa, o caminho é um scanner com protocolo VW " +
-                    "(ex.: cabo KKL + VCDS) para zerar a adaptação da central.",
+                "Se ela não sair do lugar e a sonda estiver boa, é preciso zerar a adaptação com um scanner " +
+                    "que fale o protocolo do fabricante" + if (veh.isVw) " (na VW: aba VW com o cabo KKL)." else ".",
             ).forEachIndexed { i, t -> Step(i + 1, t) }
         }
     }
@@ -336,15 +404,16 @@ private fun Step(n: Int, text: String) {
     }
 }
 
-private fun trimAdvice(ltft: Double?, stft: Double?): Pair<String, Tone> {
+private fun trimAdvice(ltft: Double?, stft: Double?, flex: Boolean): Pair<String, Tone> {
     if (ltft == null) return "Ligue o motor para ver as correções." to Tone.INFO
     val total = ltft + (stft ?: 0.0)
     return when {
         total < -10 -> ("A central está tirando %.0f%% do combustível: mistura rica. ".format(-total) +
-            "Num flex é o que acontece quando ela acha que tem mais etanol do que realmente tem. " +
-            "Outras causas: bico pingando ou pressão alta.") to Tone.WARN
+            (if (flex) "Num flex é o que acontece quando ela acha que tem mais etanol do que realmente tem. " else "") +
+            "Outras causas comuns: bico pingando, pressão de combustível alta ou sonda com defeito.") to Tone.WARN
         total > 10 -> ("A central está adicionando %.0f%% de combustível: mistura pobre. ".format(total) +
-            "Pode ser entrada falsa de ar, bomba/filtro fracos, ou a central achando que tem gasolina com etanol no tanque.") to Tone.WARN
+            "Causas comuns: entrada falsa de ar, bomba ou filtro fracos, bicos sujos" +
+            (if (flex) " ou a central achando que tem gasolina com etanol no tanque." else ".")) to Tone.WARN
         else -> "Correções dentro do normal (±10%): a central está acertando a mistura." to Tone.GOOD
     }
 }
@@ -437,7 +506,21 @@ fun DiagnosticsScreen(onConnect: () -> Unit) {
             }
         }
 
-        Section("Testes da sonda (modo 06)", icon = Icons.Filled.Science) {
+        if (d.mode06Can.isNotEmpty()) Section("Testes dos monitores (modo 06)", icon = Icons.Filled.Science) {
+            d.mode06Can.forEach { t ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("${t.name} · teste %02X".format(t.tid), style = MaterialTheme.typography.bodyMedium)
+                        Hint("valor ${t.value} · faixa ${t.min}…${t.max} (unidade %02X)".format(t.uas))
+                    }
+                    StatusPill(if (t.passed) "OK" else "fora", if (t.passed) Good else Bad)
+                }
+            }
+            Hint("Resultados brutos da última vez que a central rodou cada teste. \"Fora\" significa que " +
+                "o valor ficou fora dos limites que a própria central definiu.")
+        }
+
+        if (d.mode06Can.isEmpty()) Section("Testes da sonda (modo 06)", icon = Icons.Filled.Science) {
             if (d.mode06.isEmpty()) Hint("A central não devolveu resultados.")
             d.mode06.forEach { t ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -469,25 +552,30 @@ fun DiagnosticsScreen(onConnect: () -> Unit) {
 
 // -------------------------------------------------------------- marcha lenta
 
-private val idleLabels = listOf("Tubo do cânister solto", "Tubo conectado", "Ar ligado", "Como está agora")
+private val idleLabels = listOf("Situação A", "Situação B", "Ar-condicionado ligado", "Faróis e ventilação ligados")
 
 @Composable
 private fun IdleSection(busy: String?) {
     val runs by ObdManager.idleRuns.collectAsState()
     var label by remember { mutableStateOf(idleLabels[0]) }
+    var custom by remember { mutableStateOf("") }
+    val chosen = custom.trim().ifEmpty { label }
 
     Section("Teste de marcha lenta", icon = Icons.Filled.Speed, trailing = {
         if (runs.isNotEmpty()) TextButton(onClick = { ObdManager.clearIdleRuns() }) { Text("Limpar") }
     }) {
-        Hint("Motor quente, parado, sem acelerar. Escolha a situação e rode 45 s; depois mude " +
-            "(ex.: reconecte o tubo) e rode de novo para comparar. Se o motor morrer, o teste para e registra.")
+        Hint("Motor quente, parado, sem acelerar. Rode 45 s numa situação, mude uma coisa (ligar o ar, " +
+            "depois de uma limpeza, uma mangueira desconectada…) e rode de novo: o app compara as duas. " +
+            "Se o motor morrer, o teste para e registra.")
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             idleLabels.forEach { l ->
-                FilterChip(selected = label == l, onClick = { label = l }, label = { Text(l) })
+                FilterChip(selected = custom.isBlank() && label == l, onClick = { label = l; custom = "" }, label = { Text(l) })
             }
         }
-        FilledTonalButton(onClick = { ObdManager.idleTest(label) }, enabled = busy == null) {
-            Text("Testar: $label")
+        OutlinedTextField(custom, { custom = it.take(40) }, Modifier.fillMaxWidth(), singleLine = true,
+            placeholder = { Text("ou descreva a situação") }, shape = RoundedCornerShape(14.dp))
+        FilledTonalButton(onClick = { ObdManager.idleTest(chosen) }, enabled = busy == null) {
+            Text("Testar: $chosen", maxLines = 1)
         }
         runs.forEach { IdleCard(it) }
         idleComparison(runs)?.let { (text, tone) -> Callout(text, tone) }
@@ -551,36 +639,35 @@ private fun DecelSection(busy: String?) {
     }
 }
 
-/** Compara a primeira execução com "solto" e a última com "conectado" (se houver as duas). */
+/** Compara as duas últimas execuções; com uma só, comenta o que ela mostra. */
 private fun idleComparison(runs: List<IdleResult>): Pair<String, Tone>? {
     if (runs.isEmpty()) return null
     val last = runs.last()
-    val loose = runs.lastOrNull { it.label.contains("solto") }
-    val tight = runs.lastOrNull { it.label.contains("conectado") }
-    if (loose != null && tight != null) {
-        val dThr = (tight.throttle?.avg ?: 0.0) - (loose.throttle?.avg ?: 0.0)
-        val dRpm = (tight.rpm?.avg ?: 0.0) - (loose.rpm?.avg ?: 0.0)
-        val dMap = (tight.map?.avg ?: 0.0) - (loose.map?.avg ?: 0.0)
-        val worse = tight.stalled || dRpm < -80 || (tight.rpm?.std ?: 0.0) > (loose.rpm?.std ?: 0.0) + 30
-        val base = "Com o tubo conectado: borboleta %+.1f pontos, rotação %+.0f rpm, coletor %+.0f kPa. ".format(dThr, dRpm, dMap)
+    if (runs.size >= 2) {
+        val prev = runs[runs.size - 2]
+        val dThr = (last.throttle?.avg ?: 0.0) - (prev.throttle?.avg ?: 0.0)
+        val dRpm = (last.rpm?.avg ?: 0.0) - (prev.rpm?.avg ?: 0.0)
+        val dMap = (last.map?.avg ?: 0.0) - (prev.map?.avg ?: 0.0)
+        val worse = last.stalled || dRpm < -80 || (last.rpm?.std ?: 0.0) > (prev.rpm?.std ?: 0.0) + 30
+        val base = "De \"${prev.label}\" para \"${last.label}\": borboleta %+.1f pontos, rotação %+.0f rpm, coletor %+.0f kPa. "
+            .format(dThr, dRpm, dMap)
         return when {
-            !worse -> base + "Com o motor parado em lenta, a borboleta compensou a falta do furo. Isso não garante " +
-                "a desaceleração: rode o teste de desaceleração com o tubo conectado." to Tone.INFO
+            !worse -> base + "A lenta se manteve: a central compensou a mudança. Lembre que a desaceleração " +
+                "(teste abaixo) é onde problemas de borboleta mais aparecem." to Tone.INFO
             dThr >= 1.5 -> base + "A central ABRIU mais a borboleta e mesmo assim a lenta caiu: o ar não está passando " +
-                "como deveria. Aponta para problema físico (sujeira/obstrução no corpo de borboleta) ou sensor de " +
-                "posição lendo errado." to Tone.WARN
-            else -> base + "A central quase NÃO abriu a borboleta para compensar: ela acha que já está aberta o " +
-                "suficiente. Aponta para posição de repouso aprendida errada (falta de adaptação) ou limite de " +
-                "abertura — o caso que a adaptação com scanner VW resolve." to Tone.WARN
+                "como deveria. Aponta para sujeira/obstrução no corpo de borboleta ou sensor de posição lendo errado." to Tone.WARN
+            else -> base + "A central quase NÃO abriu a borboleta para compensar. Aponta para posição de repouso " +
+                "aprendida errada (resolve com a adaptação da borboleta no scanner do fabricante) ou limite de abertura." to Tone.WARN
         }
     }
     return when {
         last.stalled -> "O motor morreu durante o teste (${last.seconds}s)." to Tone.BAD
         (last.map?.avg ?: 0.0) > 45 && (last.throttle?.avg ?: 99.0) < 3 ->
-            "Coletor alto (%.0f kPa) com borboleta quase fechada (%.1f%%): está entrando ar por fora da borboleta. "
-                .format(last.map?.avg, last.throttle?.avg) +
-                "Com o tubo do cânister solto isso é esperado. Agora rode com o tubo conectado para comparar." to Tone.INFO
-        else -> "Rode a outra situação para comparar." to Tone.INFO
+            ("Coletor alto (%.0f kPa) com a borboleta quase fechada (%.1f%%): está entrando ar por fora da borboleta. " +
+                "Causas comuns: mangueira solta ou rachada, válvula de purga do cânister presa aberta, junta do coletor.")
+                .format(last.map?.avg, last.throttle?.avg) to Tone.WARN
+        (last.rpm?.std ?: 0.0) > 60 -> "Lenta instável (±%.0f rpm).".format(last.rpm?.std) to Tone.WARN
+        else -> "Lenta estável. Rode outra situação para comparar." to Tone.GOOD
     }
 }
 
@@ -624,7 +711,7 @@ fun ToolsScreen(onShare: (File, String) -> Unit) {
                 if (connected) Good else MaterialTheme.colorScheme.onSurfaceVariant)
         }) {
             KeyValue("Dispositivo", adapter ?: "—")
-            KeyValue("Protocolo", "ISO 9141-2 (linha K)")
+            KeyValue("Protocolo", ObdManager.vehicle.collectAsState().value.protocol)
             KeyValue("Velocidade atual", if (connected) "%.1f leituras/s".format(rate) else "—")
             FilledTonalButton(onClick = { ObdManager.runProbe() }, enabled = canSend) { Text("Testar capacidade do adaptador") }
             report?.let {

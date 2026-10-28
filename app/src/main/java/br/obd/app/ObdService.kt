@@ -67,8 +67,9 @@ class ObdService : Service() {
             updater = ObdManager.scope.launch {
                 while (isActive) {
                     // só redesenha quando o conteúdo muda (evita piscar e gastar bateria)
-                    val key = ObdManager.values.value.toString() + ObdManager.status.value +
-                        ObdManager.busy.value + ObdManager.recording.value
+                    val fresh = System.currentTimeMillis() - ObdManager.lastLiveAt < 8000
+                    val key = ObdManager.values.value.toString() + ObdManager.status.value + fresh +
+                        ObdManager.busy.value + ObdManager.recording.value + ObdManager.connected.value
                     if (key != lastShown) { nm.notify(ID, build()); lastShown = key }
                     delay(2000)
                 }
@@ -83,30 +84,43 @@ class ObdService : Service() {
         val busy = m.busy.value
         val status = m.status.value
         val rec = m.recording.value
+        val veh = m.vehicle.value
         val ptBr = Locale("pt", "BR")
         fun f(key: String, pattern: String) = v[key]?.let { String.format(ptBr, pattern, it) }
 
-        val rpm = v["rpm"]
+        // dado com mais de 8 s não vale como "agora" (leitura parada ou carro sem resposta)
+        val fresh = System.currentTimeMillis() - m.lastLiveAt < 8000
+        val rpm = v["rpm"]?.takeIf { fresh }
         val noResponse = status.startsWith("Sem resposta") || status.startsWith("Carro sem resposta")
-        val state = when {
-            busy != null -> busy
-            noResponse -> "Carro sem resposta — ligue a ignição"
-            !m.connected.value -> status
-            rpm != null && rpm < 300 -> "Ignição ligada · motor parado"
-            rec != null -> "Gravando viagem"
-            else -> "Motor ligado"
+        val running = rpm != null && rpm >= 300
+        val diesel = Pids.isDiesel(veh.fuelType)
+        val maxRpm = if (diesel) 5000.0 else 7000.0
+
+        val (title, state, dot) = when {
+            busy != null -> Triple("Ocupado", busy, ACCENT)
+            !m.connected.value -> Triple("Desconectado", status, GREY)
+            noResponse -> Triple("Sem resposta", "Ligue a ignição do carro", AMBER)
+            rpm == null -> Triple("Conectado", "Aguardando dados do carro…", GREY)
+            !running -> Triple("Motor desligado", "Ignição ligada", AMBER)
+            else -> Triple(String.format(ptBr, "%,.0f rpm", rpm), if (rec != null) "Gravando viagem" else "Motor funcionando", GREEN)
         }
-        val rpmText = rpm?.let { String.format(ptBr, "%.0f rpm", it) } ?: "— rpm"
-        val temp = f("coolant", "%.0f °C"); val speed = f("speed", "%.0f km/h")
-        val batt = f("battery", "%.1f V"); val ltft = v["ltft"]
-        val gauge = gaugeBitmap(((rpm ?: 0.0) / 7000).toFloat(), (rpm ?: 0.0) >= 6000)
+        val gauge = gaugeBitmap(rpm, maxRpm, running)
+
+        val temp = f("coolant", "%.0f °C")
+        val speed = f("speed", "%.0f km/h").takeIf { running || (v["speed"] ?: 0.0) > 0 }
+        val voltKey = if (v["battery"] != null) "battery" else "moduleV"
+        val volt = v[voltKey]
+        val batt = volt?.let { String.format(ptBr, "%.1f V", it) }
+        val ltft = v["ltft"]
 
         // recolhida
         val small = RemoteViews(packageName, R.layout.notif_small).apply {
             setImageViewBitmap(R.id.gauge, gauge)
-            setTextViewText(R.id.rpm, rpmText)
-            setTextViewText(R.id.line, listOfNotNull(temp, speed, batt).joinToString(" · ").ifEmpty { state })
-            if (ltft != null) {
+            setTextViewText(R.id.title, title)
+            setTextColor(R.id.dot, dot)
+            val line = if (m.connected.value && !noResponse && busy == null) listOfNotNull(temp, speed, batt) else emptyList()
+            setTextViewText(R.id.line, line.joinToString("  ·  ").ifEmpty { state })
+            if (ltft != null && running) {
                 setTextViewText(R.id.badge, String.format(ptBr, "%+.1f%%", ltft))
                 setTextColor(R.id.badge, trimColor(ltft))
             } else setViewVisibility(R.id.badge, View.GONE)
@@ -115,20 +129,32 @@ class ObdService : Service() {
         // expandida
         val big = RemoteViews(packageName, R.layout.notif_big).apply {
             setImageViewBitmap(R.id.gauge, gauge)
-            setTextViewText(R.id.rpm, rpmText)
+            setTextViewText(R.id.title, title)
             setTextViewText(R.id.state, state)
+            setTextColor(R.id.dot, dot)
+            val vehLine = listOfNotNull(veh.maker, veh.year?.toString(), veh.protocol.takeIf { it != "—" })
+                .joinToString(" · ")
+            if (vehLine.isNotEmpty()) setTextViewText(R.id.vehicle, vehLine) else setViewVisibility(R.id.vehicle, View.GONE)
+
             fun cell(value: String?, label: String, color: Int? = null) {
                 val c = RemoteViews(packageName, R.layout.notif_cell)
                 c.setTextViewText(R.id.value, value ?: "—")
                 c.setTextViewText(R.id.label, label)
                 if (color != null) c.setTextColor(R.id.value, color)
+                c.setInt(R.id.bar, "setColorFilter", color ?: (if (value != null) ACCENT else GREY))
                 addView(R.id.cells, c)
             }
-            val coolant = v["coolant"]; val battery = v["battery"]
-            cell(temp, "motor", coolant?.let { if (it > 105) RED else if (it < 70) CYAN else null })
-            cell(speed, "velocidade")
-            cell(batt, "bateria", battery?.let { if (it < 12.0 || it > 14.8) AMBER else null })
-            cell(ltft?.let { String.format(ptBr, "%+.1f%%", it) }, "corr. longa", ltft?.let { trimColor(it) })
+            val coolant = v["coolant"]
+            cell(temp, "Motor", coolant?.let { if (it > 105) RED else if (it < 70) CYAN else GREEN })
+            if (running) cell(f("speed", "%.0f km/h"), "Velocidade")
+            else cell(f("fuelLevel", "%.0f%%") ?: f("iat", "%.0f °C"), if (v["fuelLevel"] != null) "Tanque" else "Ar admitido")
+            cell(batt, if (voltKey == "battery") "Bateria" else "Central",
+                volt?.let { if (it < (if (running) 13.0 else 11.8) || it > 14.8) AMBER else GREEN })
+            when {
+                ltft != null -> cell(String.format(ptBr, "%+.1f%%", ltft), "Corr. longa", trimColor(ltft))
+                v["load"] != null -> cell(f("load", "%.0f%%"), "Carga")
+                else -> cell(null, "Corr. longa")
+            }
             if (rec != null) {
                 setViewVisibility(R.id.recRow, View.VISIBLE)
                 val base = SystemClock.elapsedRealtime() - (System.currentTimeMillis() - m.recordingStartedAt)
@@ -149,9 +175,8 @@ class ObdService : Service() {
         return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_obd)
             .setColor(ACCENT)
-            .setContentTitle(rpmText)
+            .setContentTitle(title)
             .setContentText(state)
-            .setSubText(state)
             .setStyle(NotificationCompat.DecoratedCustomViewStyle())
             .setCustomContentView(small)
             .setCustomBigContentView(big)
@@ -165,30 +190,47 @@ class ObdService : Service() {
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setContentIntent(open)
-            .addAction(0, if (rec == null) "Gravar viagem" else "Parar gravação", action(ACTION_RECORD, 1))
+            .apply { if (m.connected.value) addAction(0, if (rec == null) "Gravar viagem" else "Parar gravação", action(ACTION_RECORD, 1)) }
             .addAction(0, "Desconectar", action(ACTION_DISCONNECT, 2))
             .build()
     }
 
-    /** Mini mostrador de rotação (arco de 270°) desenhado na hora. */
-    private fun gaugeBitmap(frac: Float, hot: Boolean): Bitmap {
-        val px = 144
+    /** Mostrador de rotação (arco de 270°) com o valor em milhares no centro. */
+    private fun gaugeBitmap(rpm: Double?, max: Double, running: Boolean): Bitmap {
+        val px = 168
         val bmp = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
-        val stroke = px * 0.11f
+        val stroke = px * 0.10f
         val r = RectF(stroke, stroke, px - stroke, px - stroke)
         val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE; strokeWidth = stroke; strokeCap = Paint.Cap.ROUND
         }
-        p.color = 0x55808C99
+        val redFrom = (max - 1000) / max
+        p.color = 0x40808C99
         c.drawArc(r, 135f, 270f, false, p)
-        p.color = 0x66EF5350; p.strokeCap = Paint.Cap.BUTT
-        c.drawArc(r, 135f + 270f * (6000f / 7000f), 270f * (1000f / 7000f), false, p)
-        val f = frac.coerceIn(0f, 1f)
-        if (f > 0.005f) {
+        p.color = 0x70EF5350; p.strokeCap = Paint.Cap.BUTT
+        c.drawArc(r, 135f + 270f * redFrom.toFloat(), 270f * (1 - redFrom.toFloat()), false, p)
+        val frac = ((rpm ?: 0.0) / max).toFloat().coerceIn(0f, 1f)
+        val hot = frac >= redFrom
+        if (running && frac > 0.005f) {
             p.color = if (hot) RED else ACCENT; p.strokeCap = Paint.Cap.ROUND
-            c.drawArc(r, 135f, 270f * f, false, p)
+            c.drawArc(r, 135f, 270f * frac, false, p)
         }
+        // número no meio: 0.8, 2.4… (x1000) ou um traço quando não há leitura
+        val t = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textAlign = Paint.Align.CENTER
+            typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+            color = when { !running -> 0xFF9AA4AE.toInt(); hot -> RED; else -> 0xFFFFFFFF.toInt() }
+            textSize = px * 0.30f
+        }
+        val label = when {
+            rpm == null -> "–"
+            !running -> "0"
+            else -> String.format(Locale.US, "%.1f", rpm / 1000)
+        }
+        c.drawText(label, px / 2f, px / 2f + t.textSize * 0.35f, t)
+        t.typeface = android.graphics.Typeface.DEFAULT; t.textSize = px * 0.12f; t.color = 0xFF9AA4AE.toInt()
+        c.drawText("x1000", px / 2f, px * 0.86f, t)
         return bmp
     }
 
@@ -213,5 +255,6 @@ class ObdService : Service() {
         const val AMBER = 0xFFFFB74D.toInt()
         const val GREEN = 0xFF66BB6A.toInt()
         const val CYAN = 0xFF4DD0E1.toInt()
+        const val GREY = 0xFF8A949E.toInt()
     }
 }
