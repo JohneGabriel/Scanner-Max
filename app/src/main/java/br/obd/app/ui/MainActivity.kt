@@ -95,6 +95,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.StrokeCap
@@ -278,30 +279,11 @@ private fun AppRoot() {
             else -> { confirmExit = true; br.obd.app.Feedback.tick() }
         }
     }
-    if (confirmExit) {
-        val activity = context as? android.app.Activity
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { confirmExit = false },
-            icon = { LogoMark(40) },
-            title = { Text("Sair do Scanner Max?") },
-            text = {
-                Text(if (connected) "O carro está conectado. Você pode sair e manter a conexão em segundo plano " +
-                    "(viagem, alertas e notificação continuam) ou desconectar antes de sair."
-                else "Até a próxima!")
-            },
-            confirmButton = {
-                Column(horizontalAlignment = Alignment.End) {
-                    androidx.compose.material3.TextButton(onClick = { confirmExit = false; activity?.finish() }) {
-                        BtnLabel(if (connected) "Sair e manter conectado" else "Sair")
-                    }
-                    if (connected) androidx.compose.material3.TextButton(onClick = {
-                        confirmExit = false; ObdManager.disconnect(); activity?.finish()
-                    }) { BtnLabel("Desconectar e sair") }
-                }
-            },
-            dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmExit = false }) { BtnLabel("Ficar") } },
-        )
-    }
+    if (confirmExit) ExitDialog(connected, onStay = { confirmExit = false }, onExit = { disconnect ->
+        confirmExit = false
+        if (disconnect) ObdManager.disconnect()
+        (context as? android.app.Activity)?.finish()
+    })
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         ModalNavigationDrawer(
@@ -545,6 +527,39 @@ private fun Splash(onDone: () -> Unit) {
             Spacer(Modifier.height(4.dp))
             Text("Diagnóstico OBD2 para qualquer carro", style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.alpha(textAlpha.value))
+        }
+    }
+}
+
+
+/** Confirmação de saída: cartão próprio com marca, texto curto e botões de largura total. */
+@Composable
+private fun ExitDialog(connected: Boolean, onStay: () -> Unit, onExit: (disconnect: Boolean) -> Unit) {
+    androidx.compose.ui.window.Dialog(onDismissRequest = onStay) {
+        Column(
+            Modifier.fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(28.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Box(Modifier.size(64.dp).clip(androidx.compose.foundation.shape.CircleShape).background(Accent.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center) { LogoMark(36) }
+            Text("Sair do Scanner Max?", style = MaterialTheme.typography.titleLarge,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            Text(
+                if (connected) "O carro continua conectado em segundo plano: viagem, alertas e notificação seguem funcionando."
+                else "Seus dados ficam salvos no aparelho.",
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+            Spacer(Modifier.height(6.dp))
+            androidx.compose.material3.Button(onClick = { onExit(false) }, Modifier.fillMaxWidth().height(50.dp)) {
+                BtnLabel(if (connected) "Sair e manter conectado" else "Sair")
+            }
+            if (connected) androidx.compose.material3.OutlinedButton(onClick = { onExit(true) }, Modifier.fillMaxWidth().height(50.dp)) {
+                BtnLabel("Desconectar e sair")
+            }
+            androidx.compose.material3.TextButton(onClick = onStay, Modifier.fillMaxWidth()) { BtnLabel("Continuar no app") }
         }
     }
 }

@@ -13,6 +13,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -481,6 +482,7 @@ fun Callout(text: String, tone: Tone = Tone.INFO, modifier: Modifier = Modifier,
 
 /** Pílula de status: ponto colorido + texto. */
 @Composable
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 fun StatusPill(text: String, color: Color, modifier: Modifier = Modifier) {
     Row(
         modifier.clip(CircleShape).background(color.copy(alpha = 0.12f)).padding(horizontal = 10.dp, vertical = 4.dp),
@@ -488,7 +490,9 @@ fun StatusPill(text: String, color: Color, modifier: Modifier = Modifier) {
     ) {
         Box(Modifier.size(7.dp).clip(CircleShape).background(color))
         Spacer(Modifier.width(6.dp))
-        Text(text, style = MaterialTheme.typography.labelMedium, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        // texto longo rola dentro da pílula em vez de ser cortado
+        Text(text, style = MaterialTheme.typography.labelMedium, color = color, maxLines = 1, softWrap = false,
+            modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1200, velocity = 40.dp))
     }
 }
 
