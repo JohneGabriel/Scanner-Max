@@ -163,7 +163,7 @@ object ObdManager {
         _adapterName.value = "${device.name ?: "?"} · $version"
         _connected.value = true
         _status.value = "Conectado"
-        ContextCompat.startForegroundService(context, Intent(context, ObdService::class.java))
+        startService()
         scope.launch { _fuelType.value = runCatching { elm.readPid("51")?.getOrNull(0) }.getOrNull() }
         true
     } catch (e: Exception) {
@@ -172,13 +172,32 @@ object ObdManager {
         false
     }
 
+    /** O serviço já em execução continua valendo após uma reconexão; só inicia se não estiver. */
+    private var serviceStarted = false
+
+    private fun startService() {
+        if (serviceStarted) return
+        try {
+            ContextCompat.startForegroundService(context, Intent(context, ObdService::class.java))
+            serviceStarted = true
+        } catch (e: Exception) {
+            // o Android pode recusar iniciar o serviço com o app em segundo plano: a conexão segue mesmo assim
+            log("Não foi possível iniciar o serviço: ${e.message}")
+        }
+    }
+
+    private fun stopService() {
+        serviceStarted = false
+        context.stopService(Intent(context, ObdService::class.java))
+    }
+
     fun disconnect() {
         setLive(LiveMode.OFF)
         stopRecording()
         elm.close()
         _connected.value = false
         _status.value = "Desconectado"
-        context.stopService(Intent(context, ObdService::class.java))
+        stopService()
     }
 
     private suspend fun reconnect(): Boolean {
@@ -190,7 +209,7 @@ object ObdManager {
             delay(2000)
         }
         _status.value = "Não foi possível reconectar"
-        context.stopService(Intent(context, ObdService::class.java))
+        stopService()
         return false
     }
 
