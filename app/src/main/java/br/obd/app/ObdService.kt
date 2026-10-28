@@ -40,9 +40,6 @@ class ObdService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_DISCONNECT -> { ObdManager.disconnect(); return START_NOT_STICKY }
-            ACTION_RECORD -> {
-                if (ObdManager.recording.value == null) ObdManager.startRecording() else ObdManager.stopRecording()
-            }
         }
 
         val nm = getSystemService(NotificationManager::class.java)
@@ -69,7 +66,8 @@ class ObdService : Service() {
                     // só redesenha quando o conteúdo muda (evita piscar e gastar bateria)
                     val fresh = System.currentTimeMillis() - ObdManager.lastLiveAt < 8000
                     val key = ObdManager.values.value.toString() + ObdManager.status.value + fresh +
-                        ObdManager.busy.value + ObdManager.recording.value + ObdManager.connected.value
+                        ObdManager.busy.value + ObdManager.connected.value +
+                        ObdManager.trip.live.value?.let { "%.1f".format(it.km) } + Alerts.active.value.size
                     if (key != lastShown) { nm.notify(ID, build()); lastShown = key }
                     delay(2000)
                 }
@@ -83,7 +81,8 @@ class ObdService : Service() {
         val v = m.values.value
         val busy = m.busy.value
         val status = m.status.value
-        val rec = m.recording.value
+        val trip = m.trip.live.value
+        val alert = Alerts.active.value.maxByOrNull { it.level.ordinal }
         val veh = m.vehicle.value
         val ptBr = Locale("pt", "BR")
         fun f(key: String, pattern: String) = v[key]?.let { String.format(ptBr, pattern, it) }
@@ -102,7 +101,8 @@ class ObdService : Service() {
             noResponse -> Triple("Sem resposta", "Ligue a ignição do carro", AMBER)
             rpm == null -> Triple("Conectado", "Aguardando dados do carro…", GREY)
             !running -> Triple("Motor desligado", "Ignição ligada", AMBER)
-            else -> Triple(String.format(ptBr, "%,.0f rpm", rpm), if (rec != null) "Gravando viagem" else "Motor funcionando", GREEN)
+            else -> Triple(String.format(ptBr, "%,.0f rpm", rpm), alert?.title ?: if (trip != null) "Viagem em andamento" else "Motor funcionando",
+                if (alert?.level == Level.BAD) RED else GREEN)
         }
         val gauge = gaugeBitmap(rpm, maxRpm, running)
 
@@ -155,9 +155,11 @@ class ObdService : Service() {
                 v["load"] != null -> cell(f("load", "%.0f%%"), "Carga")
                 else -> cell(null, "Corr. longa")
             }
-            if (rec != null) {
+            if (trip != null) {
                 setViewVisibility(R.id.recRow, View.VISIBLE)
-                val base = SystemClock.elapsedRealtime() - (System.currentTimeMillis() - m.recordingStartedAt)
+                setTextViewText(R.id.recLabel, String.format(ptBr, "●  Viagem · %.1f km · %s  ", trip.km,
+                    trip.kmPerL?.let { String.format(ptBr, "%.1f km/L", it) } ?: String.format(ptBr, "%.2f L", trip.liters)))
+                val base = SystemClock.elapsedRealtime() - (System.currentTimeMillis() - trip.start)
                 setChronometer(R.id.chrono, base, null, true)
             }
         }
@@ -190,7 +192,6 @@ class ObdService : Service() {
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setContentIntent(open)
-            .apply { if (m.connected.value) addAction(0, if (rec == null) "Gravar viagem" else "Parar gravação", action(ACTION_RECORD, 1)) }
             .addAction(0, "Desconectar", action(ACTION_DISCONNECT, 2))
             .build()
     }

@@ -35,6 +35,16 @@ jobs:
           grep -E "^e: |error:|FAILURE|What went wrong" -A2 build.log | head -40 | while IFS= read -r l; do
             echo "::error::$l"
           done
+          grep -E "^e: " build.log > errors.txt || true
+
+      # log completo da compilação como artefato (para ler todos os erros pela API)
+      - uses: actions/upload-artifact@v5
+        if: failure()
+        with:
+          name: build-log
+          path: |
+            build.log
+            errors.txt
 
       - name: Renomear APK
         run: cp app/build/outputs/apk/release/app-release.apk obd-elm327.apk

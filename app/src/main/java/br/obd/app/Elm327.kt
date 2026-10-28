@@ -1,61 +1,43 @@
 package br.obd.app
 
-import android.annotation.SuppressLint
-import android.bluetooth.BluetoothDevice
-import android.bluetooth.BluetoothSocket
+import br.obd.app.link.Transport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.IOException
-import java.io.InputStream
-import java.io.OutputStream
-import java.util.UUID
 
 /**
- * Conversa com o ELM327 por Bluetooth Clássico (SPP).
- * Cada comando é texto terminado em \r; o adaptador responde e termina com '>'.
+ * Conversa com o ELM327 (ou compatível) por qualquer meio: Bluetooth, BLE, Wi-Fi, USB
+ * ou o simulador. Cada comando é texto terminado em \r; o adaptador responde e termina com '>'.
  */
 class Elm327(private val log: (String) -> Unit) {
 
-    private var socket: BluetoothSocket? = null
-    private var input: InputStream? = null
-    private var output: OutputStream? = null
+    private var link: Transport? = null
     private val lock = Mutex() // um comando por vez: o ELM327 não aceita pedidos sobrepostos
 
     /** Quando false, os comandos não aparecem no log (usado nos benchmarks). */
     var verbose = true
 
-    /** O Android não avisa quando o Bluetooth cai; marcamos false no primeiro erro de E/S. */
     @Volatile private var alive = false
-    val isConnected get() = alive && socket?.isConnected == true
+    val isConnected get() = alive && link?.isOpen == true
 
     /** Hora do último comando trocado com o adaptador (para o keep-alive). */
     @Volatile var lastIoAt = 0L
         private set
 
-    /** Último adaptador usado, para reconectar sem perguntar de novo. */
-    var lastDevice: BluetoothDevice? = null
+    /** Perfil do adaptador descoberto na inicialização. */
+    var profile = AdapterProfile()
         private set
 
-    @SuppressLint("MissingPermission")
-    suspend fun connect(device: BluetoothDevice) = withContext(Dispatchers.IO) {
-        val sock = try {
-            device.createInsecureRfcommSocketToServiceRecord(SPP_UUID).also { it.connect() }
-        } catch (e: Exception) {
-            // muitos clones só aceitam o canal RFCOMM 1 direto
-            log("SPP padrão falhou (${e.message}), tentando canal 1…")
-            val m = device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
-            (m.invoke(device, 1) as BluetoothSocket).also { it.connect() }
-        }
-        socket = sock
-        input = sock.inputStream
-        output = sock.outputStream
-        lastDevice = device
+    suspend fun connect(t: Transport) = withContext(Dispatchers.IO) {
+        close()
+        t.open()
+        link = t
         alive = true
     }
 
-    /** Executa E/S no socket; se a conexão caiu, fecha tudo e avisa com uma mensagem clara. */
+    /** Executa E/S no transporte; se a conexão caiu, fecha tudo e avisa com uma mensagem clara. */
     private inline fun <T> io(block: () -> T): T = try {
         block()
     } catch (e: IOException) {
@@ -69,10 +51,12 @@ class Elm327(private val log: (String) -> Unit) {
         send("ATZ", timeoutMs = 3000)  // reset
         val version = send("ATI")      // versão relatada (clones dizem v1.5 ou v2.1)
         setupDefaults()
+        profile = AdapterProfile.detect(this, link?.kind)
+        log("Adaptador: ${profile.summary}")
         send("0100", timeoutMs = 8000) // força a detecção agora (a primeira vez demora)
         val proto = send("ATDP")
         log("Protocolo: $proto")
-        return version
+        return version.lines().lastOrNull { it.isNotBlank() } ?: version
     }
 
     /** Volta às configurações que o app usa (depois de testes que mexem nelas). */
@@ -87,17 +71,15 @@ class Elm327(private val log: (String) -> Unit) {
 
     suspend fun send(cmd: String, timeoutMs: Long = 2000): String = lock.withLock {
         withContext(Dispatchers.IO) { io {
-            val inp = input ?: error("Não conectado")
-            val out = output ?: error("Não conectado")
-            while (inp.available() > 0) inp.read() // descarta lixo pendente
-            out.write("$cmd\r".toByteArray())
-            out.flush()
+            val l = link ?: throw IOException("Não conectado")
+            while (l.available() > 0) l.read() // descarta lixo pendente
+            l.write("$cmd\r".toByteArray())
 
             val sb = StringBuilder()
             val deadline = System.currentTimeMillis() + timeoutMs
             while (System.currentTimeMillis() < deadline) {
-                if (inp.available() > 0) {
-                    val c = inp.read().toChar()
+                if (l.available() > 0) {
+                    val c = l.read().toChar()
                     if (c == '>') break
                     sb.append(c)
                 } else {
@@ -117,28 +99,26 @@ class Elm327(private val log: (String) -> Unit) {
      */
     suspend fun monitor(cmd: String, durationMs: Long): List<String> = lock.withLock {
         withContext(Dispatchers.IO) { io {
-            val inp = input ?: error("Não conectado")
-            val out = output ?: error("Não conectado")
-            while (inp.available() > 0) inp.read()
-            out.write("$cmd\r".toByteArray())
-            out.flush()
+            val l = link ?: throw IOException("Não conectado")
+            while (l.available() > 0) l.read()
+            l.write("$cmd\r".toByteArray())
 
             val sb = StringBuilder()
             var ended = false
             val end = System.currentTimeMillis() + durationMs
             while (System.currentTimeMillis() < end) {
-                if (inp.available() > 0) {
-                    val c = inp.read().toChar()
+                if (l.available() > 0) {
+                    val c = l.read().toChar()
                     if (c == '>') { ended = true; break } // parou sozinho (ex.: BUFFER FULL)
                     sb.append(c)
                 } else Thread.sleep(1)
             }
             if (!ended) {
-                out.write("\r".toByteArray()); out.flush()
+                l.write("\r".toByteArray())
                 val stop = System.currentTimeMillis() + 2000
                 while (System.currentTimeMillis() < stop) {
-                    if (inp.available() > 0) {
-                        val c = inp.read().toChar()
+                    if (l.available() > 0) {
+                        val c = l.read().toChar()
                         if (c == '>') break
                         sb.append(c)
                     } else Thread.sleep(2)
@@ -195,13 +175,11 @@ class Elm327(private val log: (String) -> Unit) {
 
     fun close() {
         alive = false
-        runCatching { socket?.close() }
-        socket = null; input = null; output = null
+        runCatching { link?.close() }
+        link = null
     }
 
     companion object {
-        val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
-
         fun decodeDtc(hex: String): String {
             val v = hex.toInt(16)
             val letter = "PCBU"[(v shr 14) and 0x3]

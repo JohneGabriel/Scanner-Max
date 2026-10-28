@@ -87,11 +87,12 @@
         android:visibility="gone">
 
         <TextView
+            android:id="@+id/recLabel"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="●  Gravando viagem  "
+            android:text="●  Viagem  "
             android:textAppearance="@style/TextAppearance.Compat.Notification.Title"
-            android:textColor="#EF5350"
+            android:textColor="#FFA726"
             android:textSize="13sp" />
 
         <Chronometer
@@ -100,7 +101,7 @@
             android:layout_height="wrap_content"
             android:fontFeatureSettings="tnum"
             android:textAppearance="@style/TextAppearance.Compat.Notification.Title"
-            android:textColor="#EF5350"
+            android:textColor="#FFA726"
             android:textSize="13sp" />
     </LinearLayout>
 </LinearLayout>

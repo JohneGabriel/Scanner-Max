@@ -6,6 +6,14 @@ import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
 import androidx.core.content.ContextCompat
+import br.obd.app.link.BleTransport
+import br.obd.app.link.BtClassicTransport
+import br.obd.app.link.LinkKind
+import br.obd.app.link.LinkTarget
+import br.obd.app.link.SimTransport
+import br.obd.app.link.Transport
+import br.obd.app.link.UsbElmTransport
+import br.obd.app.link.WifiTransport
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -53,42 +61,6 @@ data class Stats(val avg: Double, val min: Double, val max: Double, val std: Dou
     }
 }
 
-data class IdleResult(
-    val label: String,
-    val seconds: Int,
-    val rpm: Stats?,
-    val map: Stats?,
-    val throttle: Stats?,
-    val advance: Stats?,
-    val coolant: Double?,
-    val stalled: Boolean,
-    val at: Long,
-)
-
-data class DecelResult(
-    val baseline: Double?,
-    val peak: Double?,
-    val dip: Double?,
-    val recoverySec: Double?,
-    val stalled: Boolean,
-    val samples: List<Pair<Long, Double>>,
-) {
-    val undershoot get() = if (baseline != null && dip != null) baseline - dip else null
-}
-
-data class LambdaResult(
-    val seconds: Int,
-    val samples: Int,
-    val min: Double,
-    val max: Double,
-    val avg: Double,
-    val switchesPerSec: Double,
-    val richPct: Int,
-    val closedLoop: Boolean,
-    val rpm: Double?,
-    val verdict: String,
-)
-
 /**
  * Estado e operações do app, independentes da tela. Vive enquanto o processo vive;
  * o ObdService mantém o processo em primeiro plano para a conexão não cair.
@@ -134,18 +106,6 @@ object ObdManager {
     private val _diag = MutableStateFlow(DiagState())
     val diag: StateFlow<DiagState> = _diag.asStateFlow()
 
-    private val _idleRuns = MutableStateFlow<List<IdleResult>>(emptyList())
-    /** Testes de marcha lenta da sessão (o mais recente por último). */
-    val idleRuns: StateFlow<List<IdleResult>> = _idleRuns.asStateFlow()
-
-    fun clearIdleRuns() { _idleRuns.value = emptyList() }
-
-    private val _decel = MutableStateFlow<DecelResult?>(null)
-    val decel: StateFlow<DecelResult?> = _decel.asStateFlow()
-
-    private val _lambda = MutableStateFlow<LambdaResult?>(null)
-    val lambda: StateFlow<LambdaResult?> = _lambda.asStateFlow()
-
     private val _resetResult = MutableStateFlow<String?>(null)
     val resetResult: StateFlow<String?> = _resetResult.asStateFlow()
 
@@ -165,15 +125,20 @@ object ObdManager {
     private val _terminal = MutableStateFlow<List<String>>(emptyList())
     val terminal: StateFlow<List<String>> = _terminal.asStateFlow()
 
-    private val _recording = MutableStateFlow<File?>(null)
-    val recording: StateFlow<File?> = _recording.asStateFlow()
+    private val _adapter = MutableStateFlow(AdapterProfile())
+    /** O que o adaptador conectado é e aceita. */
+    val adapter: StateFlow<AdapterProfile> = _adapter.asStateFlow()
 
-    /** Quando a gravação atual começou (para o cronômetro da notificação). */
-    var recordingStartedAt = 0L
-        private set
+    private val _link = MutableStateFlow<LinkTarget?>(null)
+    /** Adaptador da conexão atual (ou da última). */
+    val link: StateFlow<LinkTarget?> = _link.asStateFlow()
 
-    private val _trips = MutableStateFlow<List<File>>(emptyList())
-    val trips: StateFlow<List<File>> = _trips.asStateFlow()
+    /** Viagem automática: começa quando o motor liga, termina 45 s depois de desligar. */
+    val trip = TripTracker { s, pts ->
+        TripStore.save(s, pts)
+        Garage.addTrip(s.km, s.rawLiters)
+        log("Viagem salva: %.1f km em %.0f min, %.2f L".format(s.km, s.durationSec / 60, s.liters))
+    }
 
     private val fullLog = ArrayList<String>()
     private val _logTail = MutableStateFlow<List<String>>(emptyList())
@@ -183,12 +148,20 @@ object ObdManager {
     val elm = Elm327 { msg -> scope.launch { log(msg) } }
 
     private var liveJob: Job? = null
-    private var recordJob: Job? = null
 
     fun init(ctx: Context) {
         if (::context.isInitialized) return
         context = ctx.applicationContext
-        refreshTrips()
+        Settings.init(context)
+        Feedback.init(context)
+        Garage.init(context)
+        TripStore.init(context)
+        TestRunner.init(context)
+        Alerts.init(context)
+        Maintenance.init(context)
+        PerfRunner.init(context)
+        _link.value = savedTarget
+        loadDiag()
     }
 
     fun log(msg: String) {
@@ -201,48 +174,83 @@ object ObdManager {
     // ------------------------------------------------------------- conexão
 
     private val prefs get() = context.getSharedPreferences("obd", Context.MODE_PRIVATE)
-    val savedAddress: String? get() = prefs.getString("device", null)
+
+    /** Último adaptador usado (qualquer tipo). Migra o endereço Bluetooth das versões antigas. */
+    val savedTarget: LinkTarget?
+        get() = LinkTarget.decode(prefs.getString("target", null))
+            ?: prefs.getString("device", null)?.let { LinkTarget(LinkKind.BT_CLASSIC, it, "ELM327") }
 
     @SuppressLint("MissingPermission")
     fun bondedDevices(): List<BluetoothDevice> {
         val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter ?: return emptyList()
         if (!adapter.isEnabled) return emptyList()
         return adapter.bondedDevices.toList()
-            .sortedByDescending { (it.name ?: "").contains("OBD", ignoreCase = true) }
+            .sortedByDescending { looksLikeObd(it.name) }
     }
 
-    @SuppressLint("MissingPermission")
-    fun connect(device: BluetoothDevice) = scope.launch {
+    fun bluetoothOn(): Boolean = context.getSystemService(BluetoothManager::class.java)?.adapter?.isEnabled == true
+
+    fun looksLikeObd(name: String?): Boolean {
+        val n = (name ?: "").lowercase()
+        return listOf("obd", "elm", "vlink", "v-link", "vgate", "icar", "veepeak", "konnwei", "scan", "car", "kiwi", "torque", "link")
+            .any { n.contains(it) }
+    }
+
+    fun connect(target: LinkTarget) = scope.launch {
+        if (_status.value.startsWith("Conectando")) return@launch
         userDisconnected = false
         _vehicle.value = VehicleInfo()
         _values.value = emptyMap()
-        connectNow(device)
+        Alerts.reset()
+        if (target.kind == LinkKind.USB && !UsbElmTransport.ensurePermission(context)) {
+            _status.value = "Permissão USB negada ou adaptador não encontrado"
+            return@launch
+        }
+        connectNow(target)
     }
 
     /** true depois de "Desconectar": nenhuma rotina deve reconectar sozinha. */
     @Volatile private var userDisconnected = false
 
-    @SuppressLint("MissingPermission")
-    private suspend fun connectNow(device: BluetoothDevice): Boolean = try {
-        _status.value = "Conectando a ${device.name ?: device.address}…"
+    private fun transportFor(t: LinkTarget): Transport = when (t.kind) {
+        LinkKind.BT_CLASSIC -> {
+            val bt = context.getSystemService(BluetoothManager::class.java)?.adapter
+                ?: throw IOException("Este aparelho não tem Bluetooth")
+            if (!bt.isEnabled) throw IOException("O Bluetooth está desligado")
+            BtClassicTransport(bt.getRemoteDevice(t.address)) { log(it) }
+        }
+        LinkKind.BLE -> BleTransport(context, t.address) { log(it) }
+        LinkKind.WIFI -> WifiTransport(context, t.address)
+        LinkKind.USB -> UsbElmTransport(context) { log(it) }
+        LinkKind.DEMO -> SimTransport()
+    }
+
+    private suspend fun connectNow(target: LinkTarget): Boolean = try {
+        _status.value = "Conectando a ${target.display}…"
+        _link.value = target
         elm.close()
-        elm.connect(device)
-        _status.value = "Inicializando…"
-        val version = elm.init().lines().last()
-        prefs.edit().putString("device", device.address).apply()
-        _adapterName.value = "${device.name ?: "?"} · $version"
+        elm.connect(transportFor(target))
+        _status.value = "Inicializando o adaptador…"
+        val version = elm.init()
+        _adapter.value = elm.profile
+        prefs.edit().putString("target", target.encode()).apply()
+        _adapterName.value = "${target.display} · $version"
         _connected.value = true
         _status.value = "Conectado"
+        Feedback.start()
         startService()
         startHeartbeat()
         // primeira conexão com este carro: descobre o que ele oferece
         if (_vehicle.value.supported.isEmpty()) exclusive("Identificando o veículo…") { detectVehicle() }
+        setLive(LiveMode.DASHBOARD)
         true
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
+        elm.close()
         _connected.value = false
         _status.value = "Falha ao conectar: ${e.message}"
+        log("Falha ao conectar (${target.kind.label}): ${e.message}")
         false
     }
 
@@ -282,7 +290,9 @@ object ObdManager {
                 try {
                     val was = elm.verbose
                     elm.verbose = false
-                    try { readBattery() } finally { elm.verbose = was }
+                    try {
+                        if (_adapter.value.canReadVoltage || _adapter.value.features.isEmpty()) readBattery() else elm.send("ATI")
+                    } finally { elm.verbose = was }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -296,7 +306,8 @@ object ObdManager {
         userDisconnected = true
         heartbeatJob?.cancel(); heartbeatJob = null
         setLive(LiveMode.OFF)
-        stopRecording()
+        trip.finish()
+        Alerts.reset()
         elm.close()
         _connected.value = false
         _status.value = "Desconectado"
@@ -306,14 +317,16 @@ object ObdManager {
     private suspend fun reconnect(): Boolean {
         if (userDisconnected) return false
         _connected.value = false
-        val device = elm.lastDevice ?: return false
+        Feedback.lost()
+        val target = _link.value ?: return false
         for (attempt in 1..3) {
             _status.value = "Conexão caiu — reconectando ($attempt/3)…"
             if (userDisconnected) return false
-            if (connectNow(device)) return true
+            if (connectNow(target)) return true
             delay(2000)
         }
         _status.value = "Não foi possível reconectar"
+        trip.finish()
         stopService()
         return false
     }
@@ -326,17 +339,16 @@ object ObdManager {
      */
     private fun plan(mode: LiveMode): List<Pair<PidDef, Int>> {
         val v = _vehicle.value
-        fun ok(d: PidDef) = v.supported.isEmpty() || v.has(d)
-        val base = if (mode == LiveMode.FUEL) listOf(
-            (if (ok(Pids.O2S1) || !v.has(Pids.WB_LAMBDA)) Pids.O2S1 else Pids.WB_LAMBDA) to 1,
-            Pids.STFT to 2, Pids.RPM to 3, Pids.O2S2 to 4, Pids.LTFT to 6,
-            Pids.FUEL_STATUS to 8, Pids.COOLANT to 15,
-        ) else listOf(
-            Pids.RPM to 1, Pids.SPEED to 2, Pids.THROTTLE to 2, Pids.LOAD to 4, Pids.MAP to 6,
-            Pids.MAF to 6, Pids.ADVANCE to 8, Pids.COOLANT to 15, Pids.IAT to 15, Pids.FUEL_LEVEL to 30,
+        fun ok(d: PidDef) = if (v.supported.isEmpty()) d in BASIC else v.has(d)
+        val base = listOf(
+            Pids.RPM to 1, Pids.SPEED to 2, Pids.MAP to 3, Pids.MAF to 3, Pids.FUEL_RATE to 3, Pids.THROTTLE to 3,
+            Pids.LOAD to 6, Pids.FUEL_STATUS to 8, Pids.STFT to 8, Pids.ADVANCE to 10, Pids.COOLANT to 12,
+            Pids.LTFT to 15, Pids.IAT to 15, Pids.O2S1 to 20, Pids.FUEL_LEVEL to 40, Pids.ETHANOL to 60, Pids.OIL_TEMP to 30,
         )
         return base.filter { ok(it.first) }
     }
+
+    private val BASIC = setOf(Pids.RPM, Pids.SPEED, Pids.COOLANT, Pids.THROTTLE, Pids.LOAD, Pids.MAP, Pids.IAT)
 
     /** Sensores fora do plano principal, lidos em rodízio para a lista "Todos os sensores". */
     private fun extras(planDefs: Set<PidDef>): List<PidDef> {
@@ -359,7 +371,8 @@ object ObdManager {
     }
 
     private fun applyLive() {
-        val mode = if (!appVisible && uiMode == LiveMode.OFF && _connected.value) LiveMode.DASHBOARD else uiMode
+        // conectado, a leitura nunca para: ela alimenta a viagem, os alertas e a notificação
+        val mode = if (_connected.value && uiMode == LiveMode.OFF && !userDisconnected) LiveMode.DASHBOARD else uiMode
         _liveMode.value = mode
         if (mode == LiveMode.OFF) {
             liveJob?.cancel(); liveJob = null; return
@@ -397,7 +410,14 @@ object ObdManager {
                 } else {
                     for (d in due) { if (readInto(d) != null) answered++; requests++ }
                 }
-                if (tick % 20 == 10) { readBattery(); requests++ }
+                if (tick % 10 == 5 && (_adapter.value.canReadVoltage || _adapter.value.features.isEmpty())) { readBattery(); requests++ }
+                // luz de injeção e quantidade de códigos, de tempos em tempos (vira alerta se aumentar)
+                if (tick % 150 == 20) {
+                    elm.readPid("01", retries = 0)?.let { d ->
+                        if (d.isNotEmpty()) _values.update { it + ("milCount" to (d[0] and 0x7F).toDouble()) + ("milOn" to if (d[0] and 0x80 != 0) 1.0 else 0.0) }
+                    }
+                    requests++
+                }
                 tick++
                 addSample()
                 val now = System.currentTimeMillis()
@@ -408,6 +428,9 @@ object ObdManager {
                 // Ignição desligada e religada: o Bluetooth continua de pé (a tomada OBD tem
                 // 12 V direto), mas a sessão com a central morreu. Reabre.
                 if (answered > 0) lastLiveAt = now
+                val fresh = now - lastLiveAt < 8000
+                trip.onTick(_values.value, fresh, Garage.current.value)
+                Alerts.check(_values.value, fresh)
                 emptyCycles = if (answered == 0 && due.isNotEmpty()) emptyCycles + 1 else 0
                 if (emptyCycles >= 3) {
                     recoverBus()
@@ -491,6 +514,13 @@ object ObdManager {
         val info = VehicleInfo(protocolName(dp, dpn), can, supported, vin, fuel)
         _vehicle.value = info
         _fuelType.value = fuel
+        // CAN aguenta temporização agressiva: mais leituras por segundo
+        var aggressive = false
+        if (can && elm.profile.has("ATAT2")) { elm.send("ATAT2"); aggressive = true }
+        _adapter.value = elm.profile.copy(carProtocol = info.protocol, multiPid = multiPid, aggressiveTiming = aggressive)
+        Garage.onIdentified(info, _link.value?.address ?: "?")
+        Maintenance.load()
+        loadDiag()
         log("Veículo: ${info.maker ?: "fabricante ?"} ${info.year ?: ""} · ${info.protocol} · " +
             "${supported.size} PIDs · VIN ${vin ?: "—"} · pedidos agrupados: ${if (multiPid) "sim" else "não"}")
     }
@@ -524,6 +554,7 @@ object ObdManager {
         _values.value = emptyMap()
         while (currentCoroutineContext().isActive && _liveMode.value != LiveMode.OFF && elm.isConnected) {
             if (_busy.value != null) { delay(500); continue }
+            trip.onTick(emptyMap(), false, Garage.current.value)
             elm.send("ATPC")
             val r = elm.send("0100", timeoutMs = 10_000).replace(" ", "")
             if (r.contains("4100")) {
@@ -568,10 +599,10 @@ object ObdManager {
     // ------------------------------------------------------------- operações exclusivas
 
     /** Roda [block] com a leitura ao vivo pausada e um aviso de "ocupado" na tela. */
-    private fun exclusive(label: String, block: suspend () -> Unit) {
-        if (!_connected.value) { _status.value = "Conecte primeiro"; return }
-        if (_busy.value != null) return
-        scope.launch {
+    fun exclusive(label: String, block: suspend () -> Unit): Job? {
+        if (!_connected.value) { _status.value = "Conecte primeiro"; return null }
+        if (_busy.value != null) return null
+        return scope.launch {
             _busy.value = label
             try {
                 if (!elm.isConnected && !reconnect()) return@launch
@@ -621,6 +652,36 @@ object ObdManager {
         else for (tid in 1..8) m06 += mode06(tid)
 
         _diag.value = DiagState(stored, pending, readiness, freezeDtc, freeze, m06, m06c, System.currentTimeMillis())
+        saveDiag(_diag.value)
+        _values.update { it + ("milCount" to (readiness?.dtcCount ?: stored.size).toDouble()) }
+        if (stored.isNotEmpty() || readiness?.milOn == true) Feedback.warning() else Feedback.success()
+    }
+
+    /** Guarda o último diagnóstico no perfil do carro (aparece desconectado e no relatório). */
+    private fun saveDiag(d: DiagState) {
+        val o = org.json.JSONObject().apply {
+            put("stored", org.json.JSONArray(d.stored.orEmpty())); put("pending", org.json.JSONArray(d.pending.orEmpty()))
+            put("at", d.readAt ?: 0L); put("freezeDtc", d.freezeDtc)
+            d.readiness?.let { r ->
+                put("mil", r.milOn); put("count", r.dtcCount); put("diesel", r.diesel)
+                put("mons", org.json.JSONArray().apply { r.monitors.forEach { (n, ok) -> put(org.json.JSONArray().put(n).put(ok)) } })
+            }
+        }
+        Garage.update { it.copy(lastDiag = o.toString()) }
+    }
+
+    private fun loadDiag() {
+        if (_diag.value.readAt != null && _connected.value) return
+        val raw = Garage.current.value?.lastDiag ?: return
+        runCatching {
+            val o = org.json.JSONObject(raw)
+            fun arr(k: String) = o.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
+            val mons = o.optJSONArray("mons")
+            val readiness = if (o.has("mil")) Readiness(o.optBoolean("mil"), o.optInt("count"), o.optBoolean("diesel"),
+                (0 until (mons?.length() ?: 0)).map { i -> mons!!.getJSONArray(i).let { it.getString(0) to it.getBoolean(1) } }) else null
+            _diag.value = DiagState(arr("stored"), arr("pending"), readiness, o.optStringOrNull("freezeDtc"), emptyList(),
+                emptyList(), emptyList(), o.optLong("at").takeIf { it > 0 })
+        }
     }
 
     private suspend fun freezePid(pid: String): IntArray? {
@@ -681,147 +742,10 @@ object ObdManager {
         log("Apagar códigos: $r")
         elm.send("0100", 8000)
         _diag.value = DiagState()
+        Garage.update { it.copy(lastDiag = null) }
+        Alerts.dismiss("mil")
+        _values.update { it - "milCount" }
         _status.value = if (Elm327.isError(r)) "A central recusou: $r" else "Códigos apagados"
-    }
-
-    /**
-     * Teste da sonda lambda B1S1: lê só ela, o mais rápido possível, e conta quantas
-     * vezes cruza 0,45 V. Uma sonda boa em malha fechada oscila sem parar entre ~0,1 e ~0,9 V.
-     */
-    /**
-     * Teste de marcha lenta: só rotação, coletor, borboleta e avanço, para comparar
-     * situações (tubo do cânister solto/conectado, ar ligado...). Para se o motor morrer.
-     */
-    fun idleTest(label: String, seconds: Int = 45) = exclusive("Marcha lenta: $label…") {
-        val coolant = elm.readPid("05")?.let(Pids.COOLANT.decode)
-        val rpm = ArrayList<Double>(); val map = ArrayList<Double>()
-        val thr = ArrayList<Double>(); val adv = ArrayList<Double>()
-        var stalled = false
-        var tick = 0
-        val start = System.currentTimeMillis()
-        val end = start + seconds * 1000L
-        elm.verbose = false
-        try {
-            while (System.currentTimeMillis() < end) {
-                val r = elm.readPid("0C", retries = 0)?.let(Pids.RPM.decode)
-                if (r != null) {
-                    rpm += r
-                    if (r < 250 && rpm.size > 3) { stalled = true; break }
-                }
-                when (tick % 3) {
-                    0 -> elm.readPid("0B", retries = 0)?.let(Pids.MAP.decode)?.let { map += it }
-                    1 -> elm.readPid("11", retries = 0)?.let(Pids.THROTTLE.decode)?.let { thr += it }
-                    2 -> elm.readPid("0E", retries = 0)?.let(Pids.ADVANCE.decode)?.let { adv += it }
-                }
-                tick++
-                val left = ((end - System.currentTimeMillis()) / 1000).coerceAtLeast(0)
-                _busy.value = "Marcha lenta: $label · ${left}s · ${r?.let { "%.0f rpm".format(it) } ?: "—"}"
-            }
-        } finally {
-            elm.verbose = true
-        }
-        val secs = ((System.currentTimeMillis() - start) / 1000).toInt()
-        val res = IdleResult(label, secs, Stats.of(rpm), Stats.of(map), Stats.of(thr), Stats.of(adv),
-            coolant, stalled, System.currentTimeMillis())
-        _idleRuns.update { (it + res).takeLast(6) }
-        log("Marcha lenta [$label]: ${rpm.size} leituras, rpm ${res.rpm}, coletor ${res.map}, " +
-            "borboleta ${res.throttle}, avanço ${res.advance}, morreu=$stalled")
-    }
-
-    /**
-     * Teste de desaceleração: lê só a rotação durante [seconds] s. O usuário acelera a
-     * ~2.500 rpm e solta; medimos quanto a rotação afunda abaixo da lenta e quanto demora
-     * para voltar — é aí que o carro morre quando a borboleta volta para uma posição
-     * aprendida pequena demais.
-     */
-    fun decelTest(seconds: Int = 20) = exclusive("Desaceleração: prepare-se…") {
-        val pts = ArrayList<Pair<Long, Double>>()
-        val t0 = System.currentTimeMillis()
-        val end = t0 + seconds * 1000L
-        var stalled = false
-        var peakSeen = false
-        elm.verbose = false
-        try {
-            while (System.currentTimeMillis() < end) {
-                val r = elm.readPid("0C", retries = 0)?.let(Pids.RPM.decode) ?: continue
-                val t = System.currentTimeMillis() - t0
-                pts += t to r
-                if (r > 1500) peakSeen = true
-                _busy.value = when {
-                    t < 3000 -> "Desaceleração: aguarde a lenta… %.0f rpm".format(r)
-                    !peakSeen -> "Desaceleração: ACELERE até ~2.500 rpm e SOLTE · %.0f rpm".format(r)
-                    else -> "Desaceleração: medindo a queda… %.0f rpm".format(r)
-                }
-                if (peakSeen && r < 250) { stalled = true; break }
-            }
-        } finally {
-            elm.verbose = true
-        }
-        val pre = pts.filter { it.first < 3000 }.map { it.second }
-        val baseline = pre.sorted().let { if (it.isEmpty()) null else it[it.size / 2] }
-        val peakIdx = pts.indices.maxByOrNull { pts[it].second }
-        val peak = peakIdx?.let { pts[it].second }
-        var dip: Double? = null
-        var recovery: Double? = null
-        if (peakIdx != null && peak != null && peak > 1500 && baseline != null) {
-            val after = pts.drop(peakIdx)
-            val dropIdx = after.indexOfFirst { it.second <= baseline }
-            if (dropIdx >= 0) {
-                val tail = after.drop(dropIdx)
-                dip = tail.minOf { it.second }
-                val minIdx = tail.indexOfFirst { it.second == dip }
-                val back = tail.drop(minIdx).firstOrNull { it.second >= baseline - 50 }
-                recovery = back?.let { (it.first - tail[0].first) / 1000.0 }
-            }
-        }
-        _decel.value = DecelResult(baseline, peak, if (stalled) 0.0 else dip, recovery, stalled, pts)
-        log("Desaceleração: lenta $baseline, pico $peak, mínimo $dip, recuperação $recovery s, morreu=$stalled")
-    }
-
-    fun lambdaTest(seconds: Int = 30) = exclusive("Testando a sonda lambda ($seconds s)…") {
-        val veh = _vehicle.value
-        if (veh.supported.isNotEmpty() && !veh.has(Pids.O2S1)) {
-            _lambda.value = LambdaResult(0, 0, 0.0, 0.0, 0.0, 0.0, 0, false, null,
-                if (veh.has(Pids.WB_LAMBDA) || veh.has(Pids.WB_LAMBDA_I))
-                    "Este carro usa sonda de banda larga, que não oscila: o teste não se aplica. Acompanhe o lambda medido na tela."
-                else "Este carro não informa a tensão da sonda pelo OBD.")
-            return@exclusive
-        }
-        val status = elm.readPid("03")?.getOrNull(0)
-        val rpm = elm.readPid("0C")?.let(Pids.RPM.decode)
-        val volts = ArrayList<Double>()
-        val end = System.currentTimeMillis() + seconds * 1000L
-        elm.verbose = false
-        try {
-            while (System.currentTimeMillis() < end) {
-                elm.readPid("14", retries = 0)?.getOrNull(0)?.let { volts += it * 0.005 }
-                _busy.value = "Testando a sonda lambda… ${((end - System.currentTimeMillis()) / 1000).coerceAtLeast(0)} s"
-            }
-        } finally {
-            elm.verbose = true
-        }
-        if (volts.size < 5) {
-            _lambda.value = LambdaResult(seconds, volts.size, 0.0, 0.0, 0.0, 0.0, 0, status == 2, rpm,
-                "Poucas leituras — a central não respondeu à sonda.")
-            return@exclusive
-        }
-        var switches = 0
-        for (i in 1 until volts.size) if ((volts[i - 1] < 0.45) != (volts[i] < 0.45)) switches++
-        val min = volts.min(); val max = volts.max(); val avg = volts.average()
-        val rich = volts.count { it >= 0.45 } * 100 / volts.size
-        val perSec = switches.toDouble() / seconds
-        val closed = status == 2 || status == 16
-        val verdict = when {
-            rpm == null || rpm < 300 -> "O motor está desligado: a sonda só funciona com o motor quente e ligado."
-            !closed -> "A central está em malha aberta (${Pids.fuelStatusText(status)}). Aqueça o motor e repita."
-            max < 0.6 && min < 0.3 -> "A sonda ficou sempre baixa (pobre). Pode ser mistura pobre real ou sonda ruim."
-            min > 0.45 -> "A sonda ficou sempre alta (rica). Coerente com excesso de combustível — ou sonda travada."
-            max - min < 0.4 -> "A sonda quase não variou (%.2f–%.2f V): sinal de sonda lenta ou envelhecida.".format(min, max)
-            perSec < 0.15 -> "A sonda oscila pouco (%.2f trocas/s). Repita a ~2.000 rpm; se continuar assim, ela está lenta.".format(perSec)
-            else -> "A sonda está oscilando normalmente (%.2f trocas/s entre %.2f e %.2f V).".format(perSec, min, max)
-        }
-        _lambda.value = LambdaResult(seconds, volts.size, min, max, avg, perSec, rich, closed, rpm, verdict)
-        log("Teste da sonda: ${volts.size} leituras, $switches trocas, %.2f–%.2f V".format(min, max))
     }
 
     /**
@@ -868,46 +792,6 @@ object ObdManager {
         }
     }
 
-    // ------------------------------------------------------------- viagens
-
-    private val tripDir get() = File(context.filesDir, "trips").apply { mkdirs() }
-
-    fun refreshTrips() {
-        _trips.value = tripDir.listFiles()?.sortedByDescending { it.name } ?: emptyList()
-    }
-
-    fun startRecording() {
-        if (_recording.value != null) return
-        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
-        val file = File(tripDir, "viagem-$stamp.csv")
-        val cols = listOf("rpm", "speed", "coolant", "load", "throttle", "iat", "map", "advance",
-            "stft", "ltft", "o2s1", "o2s2", "battery")
-        file.writeText("hora," + cols.joinToString(",") + "\n")
-        recordingStartedAt = System.currentTimeMillis()
-        _recording.value = file
-        if (_liveMode.value == LiveMode.OFF) setLive(LiveMode.DASHBOARD)
-        recordJob = scope.launch {
-            val fmt = SimpleDateFormat("HH:mm:ss", Locale.US)
-            while (isActive) {
-                val v = _values.value
-                val row = fmt.format(Date()) + "," + cols.joinToString(",") { k ->
-                    v[k]?.let { "%.2f".format(Locale.US, it) } ?: ""
-                }
-                withContext(Dispatchers.IO) { file.appendText(row + "\n") }
-                delay(1000)
-            }
-        }
-        refreshTrips()
-    }
-
-    fun stopRecording() {
-        recordJob?.cancel(); recordJob = null
-        _recording.value = null
-        refreshTrips()
-    }
-
-    fun deleteTrip(f: File) { f.delete(); refreshTrips() }
-
     // ------------------------------------------------------------- exportação
 
     fun exportLogFile(): File {
@@ -919,7 +803,8 @@ object ObdManager {
             appendLine("Adaptador: ${_adapterName.value ?: "—"}")
             appendLine("Status: ${_status.value}")
             _report.value?.let { appendLine(); appendLine(it) }
-            _lambda.value?.let { appendLine(); appendLine("Teste da sonda: $it") }
+            appendLine("Adaptador: ${_adapter.value.summary}")
+            _adapter.value.features.forEach { appendLine("  ${it.cmd} (${it.label}, v${it.since}): ${if (it.ok) "sim" else "não"}") }
             _resetResult.value?.let { appendLine(); appendLine("Reset de adaptação: $it") }
             appendLine()
             appendLine("=== Log completo ===")
