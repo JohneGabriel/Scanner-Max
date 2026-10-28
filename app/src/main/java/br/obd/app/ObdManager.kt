@@ -207,6 +207,7 @@ object ObdManager {
         _vehicle.value = VehicleInfo()
         _values.value = emptyMap()
         Alerts.reset()
+        EngineHealth.reset()
         if (target.kind == LinkKind.USB && !UsbElmTransport.ensurePermission(context)) {
             _status.value = "Permissão USB negada ou adaptador não encontrado"
             return@launch
@@ -313,6 +314,7 @@ object ObdManager {
         setLive(LiveMode.OFF)
         trip.finish()
         Alerts.reset()
+        EngineHealth.reset()
         elm.close()
         _connected.value = false
         _status.value = "Desconectado"
@@ -446,6 +448,7 @@ object ObdManager {
                 val fresh = now - lastLiveAt < 8000
                 trip.onTick(_values.value, fresh, Garage.current.value)
                 Alerts.check(_values.value, fresh)
+                EngineHealth.observe(_values.value, fresh)
                 emptyCycles = if (answered == 0 && due.isNotEmpty()) emptyCycles + 1 else 0
                 if (emptyCycles >= 3) {
                     recoverBus()

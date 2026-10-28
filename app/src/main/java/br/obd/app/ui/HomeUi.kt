@@ -183,6 +183,8 @@ private fun OfflineHome(app: AppActions) {
         }
 
         MaintenanceBanner(app)
+        val offlineHealth = remember(veh?.id) { br.obd.app.EngineHealth.compute(emptyMap(), false) }
+        if (offlineHealth.items.any { it.level != Level.INFO }) HealthCard(offlineHealth, app)
 
         // última viagem
         trips.firstOrNull()?.let { t ->
@@ -378,6 +380,10 @@ private fun LiveDashboard(app: AppActions) {
             }
         }
 
+        // saúde do motor
+        val health by br.obd.app.EngineHealth.summary.collectAsState()
+        health?.let { HealthCard(it, app) }
+
         // viagem em andamento
         AnimatedVisibility(trip != null, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
             trip?.let { t ->
@@ -539,5 +545,95 @@ fun AlertBanner(a: Alert) {
         IconButton(onClick = { Alerts.dismiss(a.id) }, modifier = Modifier.size(28.dp)) {
             Icon(Icons.Filled.Close, "Dispensar", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+    }
+}
+
+
+// ============================================================== saúde do motor
+
+/** Cartão do painel: placar animado, resumo e os sistemas em pastilhas. */
+@Composable
+fun HealthCard(h: br.obd.app.HealthSummary, app: AppActions) {
+    val c = if (h.level == Level.INFO) MaterialTheme.colorScheme.onSurfaceVariant else levelColor(h.level)
+    val anim by androidx.compose.animation.core.animateIntAsState(h.score, tween(900), label = "score")
+    AppCard(onClick = { app.nav.go("health") }) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Ring(if (h.level == Level.INFO) 0f else anim / 100f, Modifier.size(84.dp), color = c, stroke = 9f) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    FitText(if (h.level == Level.INFO) "—" else "$anim", Tabular.copy(fontSize = 26.sp, fontWeight = FontWeight.Bold),
+                        Modifier.padding(horizontal = 14.dp), color = c)
+                    Text("saúde", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(h.headline, style = MaterialTheme.typography.titleMedium, color = if (h.level == Level.GOOD) MaterialTheme.colorScheme.onSurface else c,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (h.live) PulseDot(Good, 5)
+                    Text(if (h.live) "ao vivo" else "último dado salvo", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                val issues = h.items.filter { it.level == Level.BAD || it.level == Level.WARN }
+                Text(if (issues.isEmpty()) "${h.items.count { it.level == Level.GOOD }} sistemas em ordem" else issues.take(2).joinToString(" · ") { it.label },
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        AdaptiveGrid(h.items.take(6), minCell = 140.dp, maxCols = 3, spacing = 8.dp) { item, m -> HealthChip(item, m) }
+    }
+}
+
+@Composable
+private fun HealthChip(i: br.obd.app.HealthItem, modifier: Modifier) {
+    val c = if (i.level == Level.INFO) MaterialTheme.colorScheme.onSurfaceVariant else levelColor(i.level)
+    Row(modifier.clip(RoundedCornerShape(12.dp)).background(c.copy(alpha = 0.09f)).padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(8.dp).clip(androidx.compose.foundation.shape.CircleShape).background(c))
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(i.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            FitText(i.value, MaterialTheme.typography.labelLarge.merge(Tabular), color = MaterialTheme.colorScheme.onSurface)
+        }
+    }
+}
+
+/** Tela completa: cada sistema com explicação e o teste que aprofunda. */
+@Composable
+fun HealthScreen(app: AppActions) {
+    val live by br.obd.app.EngineHealth.summary.collectAsState()
+    val connected by ObdManager.connected.collectAsState()
+    val h = if (connected && live != null) live!! else remember { br.obd.app.EngineHealth.compute(emptyMap(), false) }
+    ScreenColumn {
+        val c = if (h.level == Level.INFO) MaterialTheme.colorScheme.onSurfaceVariant else levelColor(h.level)
+        val anim by androidx.compose.animation.core.animateIntAsState(h.score, tween(900), label = "score2")
+        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Ring(if (h.level == Level.INFO) 0f else anim / 100f, Modifier.widthIn(max = 180.dp).fillMaxWidth(), color = c, stroke = 14f) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    FitText(if (h.level == Level.INFO) "—" else "$anim", Tabular.copy(fontSize = 48.sp, fontWeight = FontWeight.Bold),
+                        Modifier.padding(horizontal = 24.dp), color = c)
+                    Text("de 100", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Text(h.headline, style = MaterialTheme.typography.titleLarge, color = c)
+            Hint(if (h.live) "Atualizado ao vivo enquanto o carro está conectado." else "Baseado no último diagnóstico e nos testes salvos.")
+        }
+        h.items.forEach { i ->
+            val ic = if (i.level == Level.INFO) MaterialTheme.colorScheme.onSurfaceVariant else levelColor(i.level)
+            AppCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(10.dp).clip(androidx.compose.foundation.shape.CircleShape).background(ic))
+                    Spacer(Modifier.width(10.dp))
+                    Text(i.label, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f), maxLines = 1)
+                    Text(i.value, style = MaterialTheme.typography.labelLarge.merge(Tabular), color = ic, maxLines = 1)
+                }
+                Text(i.detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (i.key == "codes") TextButton(onClick = { app.nav.home(3); if (connected) ObdManager.readDiagnostics() }) { BtnLabel("Ver diagnóstico") }
+                    if (i.key == "maint") TextButton(onClick = { app.nav.go("maint") }) { BtnLabel("Abrir manutenção") }
+                    i.testId?.let { t -> if (i.level != Level.GOOD || !h.live) TextButton(onClick = { app.nav.go("test", t) }) { BtnLabel("Rodar teste") } }
+                }
+            }
+        }
+        Hint("O placar começa em 100 e perde pontos por item em atenção (−10) ou com problema (−28). Itens sem dados não contam.")
     }
 }

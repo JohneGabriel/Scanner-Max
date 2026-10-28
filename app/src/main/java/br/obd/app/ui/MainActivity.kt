@@ -187,6 +187,7 @@ private fun pageTitle(n: Nav): String = when (n.route) {
     "result" -> "Resultado"
     "trip" -> "Viagem"
     "tools" -> "Ferramentas"
+    "health" -> "Saúde do motor"
     else -> ""
 }
 
@@ -375,6 +376,7 @@ private fun Page(p: Nav, app: AppActions) {
         "result" -> ResultScreen(p.arg?.toLongOrNull() ?: 0L, app)
         "trip" -> TripDetailScreen(p.arg?.toLongOrNull() ?: 0L, app)
         "tools" -> ToolsHubScreen(app)
+        "health" -> HealthScreen(app)
     }
 }
 
