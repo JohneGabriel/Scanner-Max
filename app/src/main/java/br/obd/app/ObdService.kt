@@ -5,6 +5,13 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.RectF
+import android.os.SystemClock
+import android.view.View
+import android.widget.RemoteViews
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
@@ -58,12 +65,10 @@ class ObdService : Service() {
         if (updater?.isActive != true) {
             updater = ObdManager.scope.launch {
                 while (isActive) {
-                    val n = build()
                     // só redesenha quando o conteúdo muda (evita piscar e gastar bateria)
-                    val key = n.extras.getCharSequence(NotificationCompat.EXTRA_TEXT).toString() +
-                        n.extras.getCharSequence(NotificationCompat.EXTRA_BIG_TEXT) +
-                        n.extras.getCharSequence(NotificationCompat.EXTRA_TITLE) + ObdManager.recording.value
-                    if (key != lastShown) { nm.notify(ID, n); lastShown = key }
+                    val key = ObdManager.values.value.toString() + ObdManager.status.value +
+                        ObdManager.busy.value + ObdManager.recording.value
+                    if (key != lastShown) { nm.notify(ID, build()); lastShown = key }
                     delay(2000)
                 }
             }
@@ -77,30 +82,57 @@ class ObdService : Service() {
         val busy = m.busy.value
         val status = m.status.value
         val rec = m.recording.value
+        val br = Locale("pt", "BR")
+        fun f(key: String, pattern: String) = v[key]?.let { String.format(br, pattern, it) }
 
-        fun f(key: String, pattern: String) = v[key]?.let { String.format(Locale("pt", "BR"), pattern, it) }
-        val rpm = f("rpm", "%.0f rpm")
-        val temp = f("coolant", "%.0f °C")
-        val speed = f("speed", "%.0f km/h")
-        val batt = f("battery", "%.1f V")
-        val ltft = f("ltft", "%+.1f%%")
-
+        val rpm = v["rpm"]
         val noResponse = status.startsWith("Sem resposta") || status.startsWith("Carro sem resposta")
-        val title = when {
+        val state = when {
             busy != null -> busy
-            noResponse -> "Carro sem resposta"
+            noResponse -> "Carro sem resposta — ligue a ignição"
             !m.connected.value -> status
+            rpm != null && rpm < 300 -> "Ignição ligada · motor parado"
             rec != null -> "Gravando viagem"
-            else -> "Conectado ao carro"
+            else -> "Motor ligado"
         }
-        val line = listOfNotNull(rpm, temp, speed).joinToString("  ·  ").ifEmpty {
-            if (noResponse) "Ligue a ignição para continuar" else "Aguardando dados…"
+        val rpmText = rpm?.let { String.format(br, "%.0f rpm", it) } ?: "— rpm"
+        val temp = f("coolant", "%.0f °C"); val speed = f("speed", "%.0f km/h")
+        val batt = f("battery", "%.1f V"); val ltft = v["ltft"]
+        val gauge = gaugeBitmap(((rpm ?: 0.0) / 7000).toFloat(), (rpm ?: 0.0) >= 6000)
+
+        // recolhida
+        val small = RemoteViews(packageName, R.layout.notif_small).apply {
+            setImageViewBitmap(R.id.gauge, gauge)
+            setTextViewText(R.id.rpm, rpmText)
+            setTextViewText(R.id.line, listOfNotNull(temp, speed, batt).joinToString("  ·  ").ifEmpty { state })
+            if (ltft != null) {
+                setTextViewText(R.id.badge, String.format(br, "%+.1f%%", ltft))
+                setTextColor(R.id.badge, trimColor(ltft))
+            } else setViewVisibility(R.id.badge, View.GONE)
         }
-        val details = buildString {
-            append(line)
-            val extra = listOfNotNull(batt?.let { "Bateria $it" }, ltft?.let { "Correção longa $it" })
-            if (extra.isNotEmpty()) append("\n").append(extra.joinToString("  ·  "))
-            m.adapterName.value?.let { append("\n").append(it) }
+
+        // expandida
+        val big = RemoteViews(packageName, R.layout.notif_big).apply {
+            setImageViewBitmap(R.id.gauge, gauge)
+            setTextViewText(R.id.rpm, rpmText)
+            setTextViewText(R.id.state, state)
+            fun cell(value: String?, label: String, color: Int? = null) {
+                val c = RemoteViews(packageName, R.layout.notif_cell)
+                c.setTextViewText(R.id.value, value ?: "—")
+                c.setTextViewText(R.id.label, label)
+                if (color != null) c.setTextColor(R.id.value, color)
+                addView(R.id.cells, c)
+            }
+            val coolant = v["coolant"]; val battery = v["battery"]
+            cell(temp, "motor", coolant?.let { if (it > 105) RED else if (it < 70) CYAN else null })
+            cell(speed, "velocidade")
+            cell(batt, "bateria", battery?.let { if (it < 12.0 || it > 14.8) AMBER else null })
+            cell(ltft?.let { String.format(br, "%+.1f%%", it) }, "corr. longa", ltft?.let { trimColor(it) })
+            if (rec != null) {
+                setViewVisibility(R.id.recRow, View.VISIBLE)
+                val base = SystemClock.elapsedRealtime() - (System.currentTimeMillis() - m.recordingStartedAt)
+                setChronometer(R.id.chrono, base, null, true)
+            }
         }
 
         val open = PendingIntent.getActivity(
@@ -115,29 +147,55 @@ class ObdService : Service() {
 
         return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_obd)
-            .setColor(0xFFFFA726.toInt())
-            .setContentTitle(title)
-            .setContentText(line)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(details))
-            .setSubText(if (rec != null) "gravando" else null)
+            .setColor(ACCENT)
+            .setContentTitle(rpmText)
+            .setContentText(state)
+            .setSubText(state)
+            .setLargeIcon(gauge)
+            .setStyle(NotificationCompat.DecoratedCustomViewStyle())
+            .setCustomContentView(small)
+            .setCustomBigContentView(big)
+            .setCustomHeadsUpContentView(small)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
+            .setShowWhen(false)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .apply {
-                if (rec != null) {
-                    setWhen(m.recordingStartedAt).setUsesChronometer(true).setShowWhen(true)
-                } else {
-                    setShowWhen(false)
-                }
-            }
             .setContentIntent(open)
             .addAction(0, if (rec == null) "Gravar viagem" else "Parar gravação", action(ACTION_RECORD, 1))
             .addAction(0, "Desconectar", action(ACTION_DISCONNECT, 2))
             .build()
+    }
+
+    /** Mini mostrador de rotação (arco de 270°) desenhado na hora. */
+    private fun gaugeBitmap(frac: Float, hot: Boolean): Bitmap {
+        val px = 144
+        val bmp = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val stroke = px * 0.11f
+        val r = RectF(stroke, stroke, px - stroke, px - stroke)
+        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = stroke; strokeCap = Paint.Cap.ROUND
+        }
+        p.color = 0x55808C99
+        c.drawArc(r, 135f, 270f, false, p)
+        p.color = 0x66EF5350; p.strokeCap = Paint.Cap.BUTT
+        c.drawArc(r, 135f + 270f * (6000f / 7000f), 270f * (1000f / 7000f), false, p)
+        val f = frac.coerceIn(0f, 1f)
+        if (f > 0.005f) {
+            p.color = if (hot) RED else ACCENT; p.strokeCap = Paint.Cap.ROUND
+            c.drawArc(r, 135f, 270f * f, false, p)
+        }
+        return bmp
+    }
+
+    private fun trimColor(v: Double) = when {
+        kotlin.math.abs(v) <= 10 -> GREEN
+        kotlin.math.abs(v) <= 20 -> AMBER
+        else -> RED
     }
 
     override fun onDestroy() {
@@ -150,5 +208,10 @@ class ObdService : Service() {
         const val ID = 1
         const val ACTION_RECORD = "br.obd.app.RECORD"
         const val ACTION_DISCONNECT = "br.obd.app.DISCONNECT"
+        const val ACCENT = 0xFFFFA726.toInt()
+        const val RED = 0xFFEF5350.toInt()
+        const val AMBER = 0xFFFFB74D.toInt()
+        const val GREEN = 0xFF66BB6A.toInt()
+        const val CYAN = 0xFF4DD0E1.toInt()
     }
 }
