@@ -395,6 +395,7 @@ fun DiagnosticsScreen(onConnect: () -> Unit) {
             }
         }
         IdleSection(busy)
+        DecelSection(busy)
 
         if (d.readAt == null) return@Screen
 
@@ -519,6 +520,37 @@ private fun IdleCard(r: IdleResult) {
     }
 }
 
+@Composable
+private fun DecelSection(busy: String?) {
+    val r by ObdManager.decel.collectAsState()
+    Section("Teste de desaceleração", icon = Icons.Filled.ShowChart) {
+        Hint("Motor quente, parado. Toque em iniciar, espere 3 s em lenta, acelere até ~2.500 rpm e solte " +
+            "o pedal de uma vez. O app mede o quanto a rotação afunda abaixo da lenta e quanto demora para voltar.")
+        FilledTonalButton(onClick = { ObdManager.decelTest() }, enabled = busy == null) { Text("Iniciar (20 s)") }
+        r?.let { d ->
+            LineChart(d.samples.map { it.second }, min = 0.0,
+                max = maxOf(3000.0, (d.peak ?: 0.0) * 1.1), reference = d.baseline)
+            KeyValue("Lenta antes", d.baseline?.let { "%.0f rpm".format(it) } ?: "—")
+            KeyValue("Pico", d.peak?.let { "%.0f rpm".format(it) } ?: "—")
+            KeyValue("Mínimo depois de soltar", if (d.stalled) "MORREU" else d.dip?.let { "%.0f rpm".format(it) } ?: "—",
+                if (d.stalled) Bad else null)
+            KeyValue("Afundou abaixo da lenta", d.undershoot?.takeIf { !d.stalled }?.let { "%.0f rpm".format(it) } ?: "—",
+                d.undershoot?.let { if (it > 150) Warn else null })
+            KeyValue("Tempo para voltar", d.recoverySec?.let { "%.1f s".format(it) } ?: "—")
+            val (txt, tone) = when {
+                d.stalled -> "O motor morreu na desaceleração. Ao soltar o pedal, a borboleta volta para a posição " +
+                    "de repouso que a central aprendeu — pequena demais para o ar que o motor precisa. É o sintoma " +
+                    "clássico de adaptação errada (ou aprendida com a entrada de ar falsa aberta)." to Tone.BAD
+                (d.peak ?: 0.0) < 1500 -> "Não detectei a acelerada: acelere até ~2.500 rpm e solte." to Tone.INFO
+                (d.undershoot ?: 0.0) > 150 -> "A rotação afundou %.0f rpm abaixo da lenta antes de voltar: ".format(d.undershoot) +
+                    "está no limite de morrer. Mesma causa provável: posição de repouso aprendida pequena demais." to Tone.WARN
+                else -> "Desaceleração normal: a rotação voltou para a lenta sem afundar." to Tone.GOOD
+            }
+            Callout(txt, tone)
+        }
+    }
+}
+
 /** Compara a primeira execução com "solto" e a última com "conectado" (se houver as duas). */
 private fun idleComparison(runs: List<IdleResult>): Pair<String, Tone>? {
     if (runs.isEmpty()) return null
@@ -532,7 +564,8 @@ private fun idleComparison(runs: List<IdleResult>): Pair<String, Tone>? {
         val worse = tight.stalled || dRpm < -80 || (tight.rpm?.std ?: 0.0) > (loose.rpm?.std ?: 0.0) + 30
         val base = "Com o tubo conectado: borboleta %+.1f pontos, rotação %+.0f rpm, coletor %+.0f kPa. ".format(dThr, dRpm, dMap)
         return when {
-            !worse -> base + "A lenta não piorou ao fechar a entrada de ar: a borboleta está dando conta sozinha." to Tone.GOOD
+            !worse -> base + "Com o motor parado em lenta, a borboleta compensou a falta do furo. Isso não garante " +
+                "a desaceleração: rode o teste de desaceleração com o tubo conectado." to Tone.INFO
             dThr >= 1.5 -> base + "A central ABRIU mais a borboleta e mesmo assim a lenta caiu: o ar não está passando " +
                 "como deveria. Aponta para problema físico (sujeira/obstrução no corpo de borboleta) ou sensor de " +
                 "posição lendo errado." to Tone.WARN

@@ -64,6 +64,17 @@ data class IdleResult(
     val at: Long,
 )
 
+data class DecelResult(
+    val baseline: Double?,
+    val peak: Double?,
+    val dip: Double?,
+    val recoverySec: Double?,
+    val stalled: Boolean,
+    val samples: List<Pair<Long, Double>>,
+) {
+    val undershoot get() = if (baseline != null && dip != null) baseline - dip else null
+}
+
 data class LambdaResult(
     val seconds: Int,
     val samples: Int,
@@ -123,6 +134,9 @@ object ObdManager {
     val idleRuns: StateFlow<List<IdleResult>> = _idleRuns.asStateFlow()
 
     fun clearIdleRuns() { _idleRuns.value = emptyList() }
+
+    private val _decel = MutableStateFlow<DecelResult?>(null)
+    val decel: StateFlow<DecelResult?> = _decel.asStateFlow()
 
     private val _lambda = MutableStateFlow<LambdaResult?>(null)
     val lambda: StateFlow<LambdaResult?> = _lambda.asStateFlow()
@@ -493,6 +507,56 @@ object ObdManager {
         _idleRuns.update { (it + res).takeLast(6) }
         log("Marcha lenta [$label]: ${rpm.size} leituras, rpm ${res.rpm}, coletor ${res.map}, " +
             "borboleta ${res.throttle}, avanço ${res.advance}, morreu=$stalled")
+    }
+
+    /**
+     * Teste de desaceleração: lê só a rotação durante [seconds] s. O usuário acelera a
+     * ~2.500 rpm e solta; medimos quanto a rotação afunda abaixo da lenta e quanto demora
+     * para voltar — é aí que o carro morre quando a borboleta volta para uma posição
+     * aprendida pequena demais.
+     */
+    fun decelTest(seconds: Int = 20) = exclusive("Desaceleração: prepare-se…") {
+        val pts = ArrayList<Pair<Long, Double>>()
+        val t0 = System.currentTimeMillis()
+        val end = t0 + seconds * 1000L
+        var stalled = false
+        var peakSeen = false
+        elm.verbose = false
+        try {
+            while (System.currentTimeMillis() < end) {
+                val r = elm.readPid("0C", retries = 0)?.let(Pids.RPM.decode) ?: continue
+                val t = System.currentTimeMillis() - t0
+                pts += t to r
+                if (r > 1500) peakSeen = true
+                _busy.value = when {
+                    t < 3000 -> "Desaceleração: aguarde a lenta… %.0f rpm".format(r)
+                    !peakSeen -> "Desaceleração: ACELERE até ~2.500 rpm e SOLTE · %.0f rpm".format(r)
+                    else -> "Desaceleração: medindo a queda… %.0f rpm".format(r)
+                }
+                if (peakSeen && r < 250) { stalled = true; break }
+            }
+        } finally {
+            elm.verbose = true
+        }
+        val pre = pts.filter { it.first < 3000 }.map { it.second }
+        val baseline = pre.sorted().let { if (it.isEmpty()) null else it[it.size / 2] }
+        val peakIdx = pts.indices.maxByOrNull { pts[it].second }
+        val peak = peakIdx?.let { pts[it].second }
+        var dip: Double? = null
+        var recovery: Double? = null
+        if (peakIdx != null && peak != null && peak > 1500 && baseline != null) {
+            val after = pts.drop(peakIdx)
+            val dropIdx = after.indexOfFirst { it.second <= baseline }
+            if (dropIdx >= 0) {
+                val tail = after.drop(dropIdx)
+                dip = tail.minOf { it.second }
+                val minIdx = tail.indexOfFirst { it.second == dip }
+                val back = tail.drop(minIdx).firstOrNull { it.second >= baseline - 50 }
+                recovery = back?.let { (it.first - tail[0].first) / 1000.0 }
+            }
+        }
+        _decel.value = DecelResult(baseline, peak, if (stalled) 0.0 else dip, recovery, stalled, pts)
+        log("Desaceleração: lenta $baseline, pico $peak, mínimo $dip, recuperação $recovery s, morreu=$stalled")
     }
 
     fun lambdaTest(seconds: Int = 30) = exclusive("Testando a sonda lambda ($seconds s)…") {
