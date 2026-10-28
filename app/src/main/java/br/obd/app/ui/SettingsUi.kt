@@ -55,6 +55,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -91,6 +93,10 @@ fun VehicleScreen(app: AppActions) {
     var name by remember(v.id) { mutableStateOf(v.name) }
     var disp by remember(v.id) { mutableStateOf(Reports.num(v.displacementL)) }
     var price by remember(v.id) { mutableStateOf("%.2f".format(v.pricePerL)) }
+    var power by remember(v.id) { mutableStateOf(v.powerCv?.toString() ?: "") }
+    var lookup by remember { mutableStateOf<String?>(null) }
+    var looking by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     ScreenColumn {
         AppCard {
@@ -102,7 +108,10 @@ fun VehicleScreen(app: AppActions) {
                     Hint(listOfNotNull(v.maker, v.year?.toString()).joinToString(" · ").ifBlank { "Fabricante não identificado" })
                 }
             }
+            v.model?.let { KeyValue("Modelo", it) }
             v.vin?.let { KeyValue("Chassi (VIN)", it) }
+            if (v.powerCv != null || v.cylinders != null) KeyValue("Motor", listOfNotNull(Reports.num(v.displacementL) + " L",
+                v.powerCv?.let { "$it cv" }, v.cylinders?.let { "$it cilindros" }).joinToString(" · "))
             v.protocol?.let { KeyValue("Protocolo", it) }
             KeyValue("Rodados com o app", "${Reports.num(v.totalKm, 0)} km")
         }
@@ -114,6 +123,8 @@ fun VehicleScreen(app: AppActions) {
                 OutlinedTextField(price, { price = it }, Modifier.weight(1f), label = { Text("R$ por litro") }, singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), shape = RoundedCornerShape(14.dp))
             }
+            OutlinedTextField(power, { power = it.filter(Char::isDigit).take(4) }, Modifier.fillMaxWidth(), label = { Text("Potência (cv, opcional)") },
+                singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), shape = RoundedCornerShape(14.dp))
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf("1.0", "1.4", "1.6", "1.8", "2.0").forEach { d ->
                     FilterChip(selected = disp.replace(",", ".") == d, onClick = { disp = d }, label = { Text(d) })
@@ -126,10 +137,21 @@ fun VehicleScreen(app: AppActions) {
                         displacementL = disp.replace(",", ".").toDoubleOrNull()?.coerceIn(0.6, 8.0) ?: it.displacementL,
                         displacementSet = disp.replace(",", ".").toDoubleOrNull() != null || it.displacementSet,
                         pricePerL = price.replace(",", ".").toDoubleOrNull() ?: it.pricePerL,
+                        powerCv = power.toIntOrNull() ?: it.powerCv,
                     )
                 }
                 Feedback.success()
-            }) { Text("Salvar") }
+            }) { BtnLabel("Salvar") }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Hint("A central do motor não informa cilindrada nem potência pelo OBD. Dá para tentar pelo chassi numa base pública (NHTSA, EUA): funciona bem para carros vendidos lá e, nos brasileiros, às vezes só traz a marca.")
+            OutlinedButton(onClick = {
+                looking = true
+                scope.launch {
+                    lookup = Garage.lookupVin(); looking = false
+                    Garage.current.value?.let { n -> disp = Reports.num(n.displacementL); power = n.powerCv?.toString() ?: power }
+                }
+            }, enabled = v.vin != null && !looking) { BtnLabel(if (looking) "Buscando…" else "Buscar pelo chassi (internet)") }
+            lookup?.let { Callout(it, if (it.startsWith("Encontrado")) Tone.GOOD else Tone.INFO) }
         }
         Section("Combustível no tanque", icon = Icons.Filled.LocalGasStation) {
             FuelKind.entries.forEach { k ->
