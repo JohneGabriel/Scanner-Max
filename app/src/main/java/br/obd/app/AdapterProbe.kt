@@ -31,7 +31,7 @@ class AdapterProbe(
             step("Escutando o barramento CAN…") { canMonitor() }
             if (!is29bit) step("Procurando módulos por UDS…") { udsScan() }
         } else {
-            step("Procurando módulos VW pela linha K…") { kwpScan() }
+            step("Testando serviços extras…") { extraServices() }
         }
         step("Restaurando configurações…") { restore() }
         progress("Teste concluído")
@@ -264,8 +264,22 @@ class AdapterProbe(
         elm.send("ATSH7DF")
     }
 
+    /** Serviços do OBD que poucas centrais implementam: modo 08 (comandar testes) e modo 09. */
+    private suspend fun extraServices() {
+        title("Serviços extras")
+        val m08 = elm.send("0800", 3000)
+        line("Modo 08 (comandar testes): ${if (Elm327.isError(m08)) "não suportado (${m08.lines().firstOrNull()})" else m08.replace("\n", " | ")}")
+        val m05 = elm.send("050100", 3000)
+        line("Modo 05 (testes da sonda, legado): ${if (Elm327.isError(m05)) "não suportado (${m05.lines().firstOrNull()})" else m05.replace("\n", " | ")}")
+        for (info in listOf("08", "0B", "0C")) {
+            val r = elm.send("09$info", 4000)
+            line("Modo 09 InfoType $info: ${r.replace("\n", " | ")}")
+        }
+    }
+
     /**
-     * Módulos VW na linha K. Cada módulo é "acordado" pelo próprio endereço:
+     * Módulos VW na linha K. (Fora do teste padrão: no Gol G5 com este clone, o ATIIA é
+     * ignorado e quem responde é sempre a ECU do motor.) Cada módulo é "acordado" pelo próprio endereço:
      *  - init lento (5 baud, protocolo 4): os key bytes dizem qual protocolo o módulo fala
      *    (01 8A = KWP1281, que o ELM327 não suporta; xx 8F = KWP2000, que ele suporta);
      *  - init rápido (protocolo 5), só KWP2000.
