@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "br.obd.app"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "br.obd.app"
