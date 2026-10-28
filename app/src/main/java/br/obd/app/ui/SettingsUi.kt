@@ -95,6 +95,10 @@ fun VehicleScreen(app: AppActions) {
     var disp by remember(v.id) { mutableStateOf(Reports.num(v.displacementL)) }
     var price by remember(v.id) { mutableStateOf("%.2f".format(v.pricePerL)) }
     var power by remember(v.id) { mutableStateOf(v.powerCv?.toString() ?: "") }
+    var tank by remember(v.id) { mutableStateOf(v.tankL?.toInt()?.toString() ?: "") }
+    var mass by remember(v.id) { mutableStateOf(v.massKg?.toString() ?: "") }
+    var factor by remember(v.id) { mutableStateOf("%.2f".format(v.calib)) }
+    val live by ObdManager.vehicle.collectAsState()
     var lookup by remember { mutableStateOf<String?>(null) }
     var looking by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -110,6 +114,8 @@ fun VehicleScreen(app: AppActions) {
                 }
             }
             v.model?.let { KeyValue("Modelo", it) }
+            live.ecuName?.let { KeyValue("Central do motor", it) }
+            live.calId?.let { KeyValue("Calibração (software)", it) }
             v.vin?.let { KeyValue("Chassi (VIN)", it) }
             if (v.powerCv != null || v.cylinders != null) KeyValue("Motor", listOfNotNull(Reports.num(v.displacementL) + " L",
                 v.powerCv?.let { "$it cv" }, v.cylinders?.let { "$it cilindros" }).joinToString(" · "))
@@ -124,6 +130,13 @@ fun VehicleScreen(app: AppActions) {
                 OutlinedTextField(price, { price = it }, Modifier.weight(1f), label = { Text("R$ por litro") }, singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), shape = RoundedCornerShape(14.dp))
             }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(tank, { tank = it.filter(Char::isDigit).take(3) }, Modifier.weight(1f), label = { Text("Tanque (L)") }, singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), shape = RoundedCornerShape(14.dp))
+                OutlinedTextField(mass, { mass = it.filter(Char::isDigit).take(4) }, Modifier.weight(1f), label = { Text("Peso (kg)") }, singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), shape = RoundedCornerShape(14.dp))
+            }
+            Hint("Tanque: mostra a autonomia no painel (se o carro informa o nível). Peso com motorista: estima a potência no teste de desempenho.")
             OutlinedTextField(power, { power = it.filter(Char::isDigit).take(4) }, Modifier.fillMaxWidth(), label = { Text("Potência (cv, opcional)") },
                 singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), shape = RoundedCornerShape(14.dp))
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -139,6 +152,8 @@ fun VehicleScreen(app: AppActions) {
                         displacementSet = disp.replace(",", ".").toDoubleOrNull() != null || it.displacementSet,
                         pricePerL = price.replace(",", ".").toDoubleOrNull() ?: it.pricePerL,
                         powerCv = power.toIntOrNull() ?: it.powerCv,
+                        tankL = tank.toDoubleOrNull() ?: it.tankL,
+                        massKg = mass.toIntOrNull() ?: it.massKg,
                     )
                 }
                 Feedback.success()
@@ -180,6 +195,15 @@ fun VehicleScreen(app: AppActions) {
             Step(2, "Rode normalmente com o app conectado (pelo menos uns 50 km).")
             Step(3, "Encha de novo e informe quantos litros entraram. O app compara com a estimativa e se ajusta.")
             v.rawSinceFull?.let { KeyValue("Estimado desde a última marcação", "${Reports.num(it * v.calib, 2)} L") }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(factor, { factor = it.take(5) }, Modifier.weight(1f), label = { Text("Fator manual (1,00 = sem ajuste)") }, singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), shape = RoundedCornerShape(14.dp))
+                Spacer(Modifier.width(8.dp))
+                TextButton(onClick = {
+                    factor.replace(",", ".").toDoubleOrNull()?.coerceIn(0.3, 3.0)?.let { k -> Garage.update { it.copy(calib = k) }; Feedback.success() }
+                }) { BtnLabel("Aplicar") }
+            }
+            Hint("Se o consumo do app sai, por exemplo, 10% acima do real, use 0,90.")
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(onClick = { Garage.markFull(); Feedback.success() }, Modifier.weight(1f)) { BtnLabel("Enchi o tanque") }
                 FilledTonalButton(onClick = { calibDialog = true }, Modifier.weight(1f), enabled = (v.rawSinceFull ?: 0.0) > 0.5) { BtnLabel("Informar litros") }
@@ -271,6 +295,7 @@ fun AdapterScreen(app: AppActions) {
             }
             Hint("O padrão ELM327 cobre todos estes. Clones baratos às vezes não têm o circuito do J1850 (Ford/GM antigos). A detecção é automática.")
         }
+        AdvancedLink()
         Section("Teste completo do adaptador", icon = Icons.Filled.Science) {
             Hint("Mede tudo o que o adaptador e o carro aceitam: módulos, PIDs, velocidade, monitoramento. Leva até 1 minuto. Só leitura.")
             FilledTonalButton(onClick = { ObdManager.runProbe() }, enabled = connected && busy == null) { BtnLabel("Rodar teste completo") }
@@ -324,6 +349,7 @@ fun CustomizeScreen() {
         Section("Som e vibração", icon = Icons.Filled.Vibration) {
             ToggleRow("Vibração", prefs.haptics) { on -> Settings.update { it.copy(haptics = on) }; if (on) Feedback.tick() }
             ToggleRow("Sons", prefs.sounds) { on -> Settings.update { it.copy(sounds = on) }; if (on) Feedback.success() }
+            ToggleRow("Falar os alertas em voz alta", prefs.voice) { on -> Settings.update { it.copy(voice = on) }; if (on) br.obd.app.Speech.say("Alertas por voz ligados") }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { Feedback.success() }) { BtnLabel("Testar ok") }
                 OutlinedButton(onClick = { Feedback.warning() }) { BtnLabel("Testar alerta") }
@@ -409,5 +435,29 @@ fun ThemePicker() {
             }
         }
     
+    }
+}
+
+
+/** Ajustes manuais de comunicação (protocolo forçado, comandos extras). */
+@Composable
+private fun AdvancedLink() {
+    val prefs by Settings.prefs.collectAsState()
+    var extra by remember { mutableStateOf(prefs.extraInit) }
+    Section("Ajustes de comunicação", icon = Icons.Filled.Tune) {
+        Text("Protocolo", style = MaterialTheme.typography.titleSmall)
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            (listOf("0" to "Automático") + AdapterProfile.PROTOCOLS.map { it.first to "${it.first} · ${it.second.substringBefore(" (").take(22)}" }).forEach { (n, l) ->
+                FilterChip(selected = prefs.forcedProtocol == n, onClick = { Settings.update { it.copy(forcedProtocol = n) } }, label = { Text(l, maxLines = 1) })
+            }
+        }
+        Hint("No automático o app procura sozinho e, se falhar, testa um protocolo por vez. Force só se souber qual o seu carro usa.")
+        OutlinedTextField(extra, { extra = it.take(120) }, Modifier.fillMaxWidth(), label = { Text("Comandos extras na conexão") },
+            placeholder = { Text("ex.: ATST 64; ATSH 7E0") }, singleLine = true, shape = RoundedCornerShape(14.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = { Settings.update { it.copy(extraInit = extra.trim()) }; Feedback.success() }) { BtnLabel("Salvar") }
+            TextButton(onClick = { extra = ""; Settings.update { it.copy(extraInit = "", forcedProtocol = "0") } }) { BtnLabel("Restaurar padrão") }
+        }
+        Hint("Valem a partir da próxima conexão.")
     }
 }

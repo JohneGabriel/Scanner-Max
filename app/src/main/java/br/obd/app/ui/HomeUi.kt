@@ -436,6 +436,9 @@ private fun LiveDashboard(app: AppActions) {
             if (has(Pids.ADVANCE)) add(CardSpec("advance", "Avanço", fmt(v["advance"], "%.1f", "°"), Icons.Filled.Bolt, null))
             if (veh.has(Pids.FUEL_LEVEL)) add(CardSpec("fuelLevel", "Tanque", fmt(v["fuelLevel"], unit = "%"), Icons.Filled.LocalGasStation,
                 v["fuelLevel"]?.let { if (it <= prefs.lowFuelPct) Warn else null }))
+            br.obd.app.rangeKm(v["fuelLevel"], profile, br.obd.app.TripStore.trips.value)?.let { r ->
+                add(CardSpec("range", "Autonomia", "≈ ${r.toInt()} km", Icons.Filled.Route, if (r < 60) Warn else null))
+            }
             if (veh.has(Pids.OIL_TEMP)) add(CardSpec("oilTemp", "Óleo", fmt(v["oilTemp"], unit = " °C"), Icons.Filled.Opacity, null))
             if (veh.has(Pids.ETHANOL)) add(CardSpec("ethanol", "Etanol", fmt(v["ethanol"], unit = "%"), Icons.Filled.WaterDrop, null))
         }.filter { it.key !in prefs.hiddenCards }
@@ -487,7 +490,9 @@ private fun LiveDashboard(app: AppActions) {
                                 else -> d.format(value)
                             })
                         }
-                        Hint("Os sensores fora do painel são lidos em rodízio: cada um atualiza a cada poucos segundos.")
+                        val customs by br.obd.app.CustomPids.list.collectAsState()
+                        customs.forEach { c -> KeyValue("★ ${c.name}", v[c.key]?.let { "%.2f %s".format(it, c.unit) } ?: "…") }
+                        Hint("Os sensores fora do painel são lidos em rodízio: cada um atualiza a cada poucos segundos. ★ = personalizado.")
                     } else Hint("${all.size} de ${Pids.ALL.size} sensores que o app conhece respondem neste carro" +
                         (if (unavailable.isNotEmpty()) " (${unavailable.size} declarado(s) pela central mas sem resposta, escondido(s))." else ".") +
                         " O app pergunta à central o que ela suporta e mostra só o que funciona.")

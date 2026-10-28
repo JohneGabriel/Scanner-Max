@@ -27,6 +27,12 @@ data class Prefs(
     val hiddenCards: Set<String> = emptySet(),
     val secondGauge: String = "speed",
     val onboarded: Boolean = false,
+    /** "0" automático ou número do protocolo forçado (ATSP). */
+    val forcedProtocol: String = "0",
+    /** Comandos AT extras na conexão. */
+    val extraInit: String = "",
+    /** Fala os alertas em voz alta. */
+    val voice: Boolean = false,
 )
 
 object Settings {
@@ -46,6 +52,7 @@ object Settings {
             redline = s.getInt("redline", 6200), lowFuelPct = s.getInt("lowFuel", 10),
             hiddenCards = s.getStringSet("hidden", emptySet())!!.toSet(),
             secondGauge = s.getString("gauge2", "speed")!!, onboarded = s.getBoolean("onboarded", false),
+            forcedProtocol = s.getString("proto", "0")!!, extraInit = s.getString("extraInit", "")!!, voice = s.getBoolean("voice", false),
         )
     }
 
@@ -57,7 +64,8 @@ object Settings {
             .putBoolean("autoConnect", p.autoConnect).putBoolean("haptics", p.haptics).putBoolean("sounds", p.sounds)
             .putBoolean("alerts", p.alerts).putInt("coolantWarn", p.coolantWarn).putInt("redline", p.redline)
             .putInt("lowFuel", p.lowFuelPct).putStringSet("hidden", p.hiddenCards).putString("gauge2", p.secondGauge)
-            .putBoolean("onboarded", p.onboarded)
+            .putBoolean("onboarded", p.onboarded).putString("proto", p.forcedProtocol).putString("extraInit", p.extraInit)
+            .putBoolean("voice", p.voice)
             .apply()
     }
 }
@@ -110,4 +118,27 @@ object Feedback {
 
     /** Conexão caiu. */
     fun lost() { vibrate(longArrayOf(0, 200)); beep(ToneGenerator.TONE_PROP_NACK, 250) }
+}
+
+
+/** Alertas falados (Text-to-Speech do Android, em português). */
+object Speech {
+    private var tts: android.speech.tts.TextToSpeech? = null
+    private var ready = false
+    private lateinit var ctx: Context
+
+    fun init(c: Context) { ctx = c.applicationContext }
+
+    fun say(text: String) {
+        if (!Settings.prefs.value.voice) return
+        val t = tts
+        if (t == null) {
+            tts = android.speech.tts.TextToSpeech(ctx) { st ->
+                ready = st == android.speech.tts.TextToSpeech.SUCCESS
+                if (ready) { tts?.language = java.util.Locale("pt", "BR"); tts?.speak(text, android.speech.tts.TextToSpeech.QUEUE_ADD, null, "a") }
+            }
+            return
+        }
+        if (ready) t.speak(text, android.speech.tts.TextToSpeech.QUEUE_ADD, null, text.hashCode().toString())
+    }
 }

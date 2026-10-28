@@ -12,8 +12,8 @@ android {
         applicationId = "br.obd.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 19
-        versionName = "1.4"
+        versionCode = 20
+        versionName = "1.5"
     }
 
     signingConfigs {

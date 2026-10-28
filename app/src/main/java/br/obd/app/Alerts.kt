@@ -125,6 +125,7 @@ object Alerts {
         lastFired[a.id] = now
         ObdManager.log("ALERTA ${a.level}: ${a.title}")
         when (a.level) { Level.BAD -> Feedback.critical(); Level.WARN -> Feedback.warning(); else -> Feedback.step() }
+        Speech.say(a.title)
         if (a.level == Level.INFO) return
         val nm = ctx.getSystemService(NotificationManager::class.java)
         val open = PendingIntent.getActivity(ctx, 10, Intent(ctx, MainActivity::class.java)

@@ -175,7 +175,7 @@ private fun pageTitle(n: Nav): String = when (n.route) {
     "lookup" -> "Consultar código"
     "dtc" -> n.arg ?: "Código"
     "flex" -> "Etanol ou gasolina?"
-    "perf" -> "Aceleração"
+    "perf" -> "Desempenho"
     "maint" -> "Manutenção"
     "terminal" -> "Terminal"
     "log" -> "Log e exportação"
@@ -188,6 +188,9 @@ private fun pageTitle(n: Nav): String = when (n.route) {
     "trip" -> "Viagem"
     "tools" -> "Ferramentas"
     "health" -> "Saúde do motor"
+    "hud" -> "Modo HUD"
+    "graphs" -> "Gráficos ao vivo"
+    "custom" -> "Sensores personalizados"
     else -> ""
 }
 
@@ -380,6 +383,9 @@ private fun Page(p: Nav, app: AppActions) {
         "trip" -> TripDetailScreen(p.arg?.toLongOrNull() ?: 0L, app)
         "tools" -> ToolsHubScreen(app)
         "health" -> HealthScreen(app)
+        "hud" -> HudScreen()
+        "graphs" -> GraphsScreen(app)
+        "custom" -> CustomPidsScreen()
     }
 }
 
@@ -413,8 +419,11 @@ private fun DrawerContent(app: AppActions, go: (String) -> Unit) {
 
         DrawerGroup("Ferramentas")
         MenuRow(Icons.Filled.Search, "Consultar código de falha", "Explicação e pesquisa com um toque") { go("lookup") }
+        MenuRow(Icons.Filled.Timeline, "Gráficos ao vivo", "Até 3 sensores ao mesmo tempo") { go("graphs") }
+        MenuRow(Icons.Filled.Speed, "Modo HUD", "Números grandes, espelhado para o para-brisa") { go("hud") }
+        MenuRow(Icons.Filled.Terminal, "Sensores personalizados", "PIDs do fabricante com fórmula própria") { go("custom") }
         MenuRow(Icons.Filled.LocalGasStation, "Etanol ou gasolina?", "Qual compensa abastecer") { go("flex") }
-        MenuRow(Icons.Filled.Timer, "Aceleração 0–100 km/h", "Cronômetro pela velocidade da central") { go("perf") }
+        MenuRow(Icons.Filled.Timer, "Desempenho", "0–100, 400 m, frenagem e potência") { go("perf") }
         MenuRow(Icons.Filled.Usb, "Central do fabricante", "Cabo KKL (VW/Audi): blocos de medição", Cyan) { go("cable") }
         MenuRow(Icons.Filled.Terminal, "Terminal", "Comandos AT e OBD") { go("terminal") }
 

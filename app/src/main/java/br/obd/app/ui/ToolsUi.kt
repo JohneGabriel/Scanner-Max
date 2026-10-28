@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -150,51 +151,78 @@ fun PerfScreen(app: AppActions) {
     val st by PerfRunner.state.collectAsState()
     val best by PerfRunner.best.collectAsState()
     val connected by ObdManager.connected.collectAsState()
+    val veh by Garage.current.collectAsState()
     var accepted by remember { mutableStateOf(false) }
+    var mode by remember { mutableStateOf(PerfState.Mode.ACCEL) }
     ScreenColumn {
         Callout("Use só em local fechado e seguro, nunca em vias públicas. Concentre-se na direção: o app avisa com som e vibração.", Tone.WARN)
         val s = st
         if (s == null) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = mode == PerfState.Mode.ACCEL, onClick = { mode = PerfState.Mode.ACCEL }, label = { Text("Aceleração") })
+                FilterChip(selected = mode == PerfState.Mode.BRAKE, onClick = { mode = PerfState.Mode.BRAKE }, label = { Text("Frenagem") })
+            }
             AppCard {
                 Text("Como funciona", style = MaterialTheme.typography.titleMedium)
-                Step(1, "Pare o carro completamente.")
-                Step(2, "Toque em Armar. Quando aparecer PRONTO, acelere.")
-                Step(3, "O cronômetro começa sozinho quando a velocidade sai do zero e marca 40, 60, 80 e 100 km/h.")
+                if (mode == PerfState.Mode.ACCEL) {
+                    Step(1, "Pare o carro completamente.")
+                    Step(2, "Toque em Armar. Quando aparecer PRONTO, acelere.")
+                    Step(3, "O cronômetro começa sozinho e marca 40, 60, 80, 100 km/h e os 400 m.")
+                    if (veh?.massKg == null) Hint("Informe o peso do carro em Meu veículo para o app estimar a potência nas rodas.")
+                } else {
+                    Step(1, "Toque em Armar e passe de 80 km/h.")
+                    Step(2, "Freie forte até parar. O app mede tempo e distância e converte para 100→0 km/h.")
+                }
                 Hint("A precisão depende de quantas leituras por segundo o carro responde: em CAN fica em décimos de segundo; na linha K, ~0,3 s.")
             }
-            Button(onClick = { if (accepted) PerfRunner.start() else accepted = true }, enabled = connected, modifier = Modifier.fillMaxWidth()) {
-                Text(if (!connected) "Conecte para medir" else if (accepted) "Armar" else "Entendi, estou em local seguro")
+            Button(onClick = { if (accepted) PerfRunner.start(mode) else accepted = true }, enabled = connected, modifier = Modifier.fillMaxWidth()) {
+                BtnLabel(if (!connected) "Conecte para medir" else if (accepted) "Armar" else "Entendi, estou em local seguro")
             }
         } else {
             val color = when (s.phase) { PerfState.Phase.READY -> Good; PerfState.Phase.RUNNING -> Accent; PerfState.Phase.DONE -> Cyan; else -> Warn }
             val t = rememberInfiniteTransition(label = "perf")
-            val sc by t.animateFloat(1f, if (s.phase == PerfState.Phase.READY) 1.06f else 1f, infiniteRepeatable(tween(500), RepeatMode.Reverse), label = "sc")
+            val sc by t.animateFloat(1f, if (s.phase == PerfState.Phase.READY) 1.05f else 1f, infiniteRepeatable(tween(500), RepeatMode.Reverse), label = "sc")
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(color.copy(alpha = 0.12f)).padding(22.dp).scale(sc),
                 horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(when (s.phase) {
-                    PerfState.Phase.WAITING_STOP -> "PARE O CARRO"
-                    PerfState.Phase.READY -> "PRONTO — ACELERE"
-                    PerfState.Phase.RUNNING -> "MEDINDO"
-                    PerfState.Phase.DONE -> "CONCLUÍDO"
+                Text(when {
+                    s.phase == PerfState.Phase.WAITING_STOP -> "PARE O CARRO"
+                    s.phase == PerfState.Phase.READY && s.mode == PerfState.Mode.ACCEL -> "PRONTO — ACELERE"
+                    s.phase == PerfState.Phase.READY -> "PASSE DE 80 km/h E FREIE"
+                    s.phase == PerfState.Phase.RUNNING -> "MEDINDO"
+                    else -> "CONCLUÍDO"
                 }, style = MaterialTheme.typography.titleMedium, color = color, fontWeight = FontWeight.Bold)
                 FitText("%.2f s".format(s.elapsed), Tabular.copy(fontSize = 56.sp, fontWeight = FontWeight.Bold))
-                Text("${s.speed?.toInt() ?: "—"} km/h · %.1f leituras/s".format(s.sampleHz), style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("${s.speed?.toInt() ?: "—"} km/h · ${s.distance.toInt()} m · %.1f leituras/s".format(s.sampleHz),
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
             }
             AppCard {
-                PerfRunner.TARGETS.forEach { tgt ->
-                    KeyValue("0 – $tgt km/h", s.splits[tgt]?.let { "%.2f s".format(it) } ?: "—",
-                        if (s.splits[tgt] != null && (best[tgt] ?: 999.0) >= s.splits[tgt]!!) Good else null)
+                if (s.mode == PerfState.Mode.ACCEL) {
+                    PerfRunner.TARGETS.forEach { tgt ->
+                        KeyValue("0 – $tgt km/h", s.splits[tgt]?.let { "%.2f s".format(it) } ?: "—",
+                            if (s.splits[tgt] != null && (best[tgt] ?: 999.0) >= s.splits[tgt]!!) Good else null)
+                    }
+                    KeyValue("400 m", s.quarter?.let { "%.2f s · %.0f km/h".format(it.first, it.second) } ?: "—")
+                    s.powerCv?.let { KeyValue("Potência estimada nas rodas", "%.0f cv".format(it)) }
+                } else {
+                    s.brake?.let { (v, tt, d) ->
+                        KeyValue("De", "%.0f km/h".format(v))
+                        KeyValue("Tempo até parar", "%.2f s".format(tt))
+                        KeyValue("Distância", "%.1f m".format(d))
+                        KeyValue("Equivalente 100 → 0", "%.1f m".format(d * (100 / v) * (100 / v)))
+                    } ?: Hint("Aguardando a frenagem…")
                 }
-                if (s.trace.size >= 2) LineChart(s.trace.map { it.second }, min = 0.0, max = 110.0, color = Accent, height = 100)
+                if (s.trace.size >= 2) LineChart(s.trace.map { it.second }, min = 0.0, max = maxOf(110.0, s.trace.maxOf { it.second } * 1.1), color = Accent, height = 100)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(onClick = { PerfRunner.stop() }, Modifier.weight(1f)) { BtnLabel(if (s.phase == PerfState.Phase.DONE) "Fechar" else "Cancelar") }
-                if (s.phase == PerfState.Phase.DONE) Button(onClick = { PerfRunner.stop(); PerfRunner.start() }, Modifier.weight(1f)) { BtnLabel("De novo") }
+                if (s.phase == PerfState.Phase.DONE) Button(onClick = { val m = s.mode; PerfRunner.stop(); PerfRunner.start(m) }, Modifier.weight(1f)) { BtnLabel("De novo") }
             }
         }
-        if (best.isNotEmpty()) Section("Seus melhores tempos", icon = Icons.Filled.Speed) {
-            best.toSortedMap().forEach { (t, v) -> KeyValue("0 – $t km/h", "%.2f s".format(v)) }
+        if (best.isNotEmpty()) Section("Seus recordes", icon = Icons.Filled.Speed) {
+            PerfRunner.TARGETS.forEach { t -> best[t]?.let { KeyValue("0 – $t km/h", "%.2f s".format(it)) } }
+            best[400]?.let { KeyValue("400 m", "%.2f s".format(it)) }
+            best[-1]?.let { KeyValue("Frenagem 100 → 0", "%.1f m".format(it)) }
+            best[-2]?.let { KeyValue("Potência estimada", "%.0f cv".format(it)) }
         }
     }
 }

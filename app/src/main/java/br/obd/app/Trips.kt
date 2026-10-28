@@ -333,3 +333,24 @@ data class TripTotals(
         }
     }
 }
+
+
+/** CO₂ do escapamento por litro queimado (kg), pelo combustível do perfil. */
+fun co2PerLiter(p: VehicleProfile?): Double {
+    val g = 2.10; val e = 1.51
+    return when (p?.fuel) {
+        FuelKind.ETANOL -> e
+        FuelKind.GASOLINA_PURA -> 2.31
+        FuelKind.DIESEL -> 2.68
+        FuelKind.MISTURA -> { val x = (p.ethanolPct / 100.0); x * e + (1 - x) * g }
+        else -> g
+    }
+}
+
+/** Autonomia estimada (km) pelo nível do tanque, capacidade e consumo médio recente. */
+fun rangeKm(levelPct: Double?, p: VehicleProfile?, recent: List<TripSummary>): Double? {
+    val tank = p?.tankL ?: return null
+    val lvl = levelPct ?: return null
+    val kmpl = TripTotals.of(recent.filter { it.vehicleId == p.id }.take(10)).kmPerL ?: return null
+    return tank * lvl / 100 * kmpl
+}

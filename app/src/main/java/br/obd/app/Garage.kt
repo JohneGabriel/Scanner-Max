@@ -44,6 +44,10 @@ data class VehicleProfile(
     val model: String? = null,
     val powerCv: Int? = null,
     val cylinders: Int? = null,
+    /** Capacidade do tanque (L), para a autonomia. */
+    val tankL: Double? = null,
+    /** Peso com motorista (kg), para estimar a potência. */
+    val massKg: Int? = null,
 ) {
     /** Relação ar/combustível estequiométrica e densidade (kg/L) do que está no tanque. */
     fun afrDensity(measuredEthanolPct: Double? = null): Pair<Double, Double> {
@@ -60,7 +64,7 @@ data class VehicleProfile(
         put("protocol", protocol); put("disp", displacementL); put("dispSet", displacementSet)
         put("fuel", fuel.name); put("eth", ethanolPct); put("price", pricePerL); put("calib", calib)
         put("calibN", calibCount); put("rawFull", rawSinceFull); put("seen", lastSeen); put("km", totalKm)
-        put("diag", lastDiag); put("model", model); put("cv", powerCv); put("cyl", cylinders)
+        put("diag", lastDiag); put("model", model); put("cv", powerCv); put("cyl", cylinders); put("tank", tankL); put("mass", massKg)
     }
 
     companion object {
@@ -74,6 +78,7 @@ data class VehicleProfile(
             calibCount = o.optInt("calibN", 0), rawSinceFull = o.optDoubleOrNull("rawFull"),
             lastSeen = o.optLong("seen", 0), totalKm = o.optDouble("km", 0.0), lastDiag = o.optStringOrNull("diag"),
             model = o.optStringOrNull("model"), powerCv = o.optIntOrNull("cv"), cylinders = o.optIntOrNull("cyl"),
+            tankL = o.optDoubleOrNull("tank"), massKg = o.optIntOrNull("mass"),
         )
     }
 }

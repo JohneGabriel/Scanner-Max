@@ -181,6 +181,8 @@ object ObdManager {
         Alerts.init(context)
         Maintenance.init(context)
         PerfRunner.init(context)
+        CustomPids.init(context)
+        Speech.init(context)
         _link.value = savedTarget
         loadDiag()
     }
@@ -258,7 +260,7 @@ object ObdManager {
         elm.close()
         elm.connect(transportFor(target))
         _status.value = "Inicializando o adaptador…"
-        val version = elm.init()
+        val version = elm.init(Settings.prefs.value.forcedProtocol, Settings.prefs.value.extraInit)
         _adapter.value = elm.profile
         if (target.kind != LinkKind.DEMO) prefs.edit().putString("target", target.encode()).apply()
         _adapterName.value = "${target.display} · $version"
@@ -383,7 +385,9 @@ object ObdManager {
             Pids.LOAD to 6, Pids.FUEL_STATUS to 8, Pids.STFT to 8, Pids.ADVANCE to 10, Pids.COOLANT to 12,
             Pids.LTFT to 15, Pids.IAT to 15, Pids.O2S1 to 20, Pids.FUEL_LEVEL to 40, Pids.ETHANOL to 60, Pids.OIL_TEMP to 30,
         )
-        return base.filter { ok(it.first) }
+        // sensores escolhidos na tela de gráficos são lidos em todo ciclo
+        val focused = focus.mapNotNull { Pids.byKey[it] }.filter { ok(it) && base.none { b -> b.first == it } }.map { it to 1 }
+        return base.filter { ok(it.first) }.map { (d, e) -> if (d.key in focus) d to 1 else d to e } + focused
     }
 
     private val BASIC = setOf(Pids.RPM, Pids.SPEED, Pids.COOLANT, Pids.THROTTLE, Pids.LOAD, Pids.MAP, Pids.IAT)
@@ -454,6 +458,14 @@ object ObdManager {
                     elm.readPid("01", retries = 0)?.let { d ->
                         if (d.isNotEmpty()) _values.update { it + ("milCount" to (d[0] and 0x7F).toDouble()) + ("milOn" to if (d[0] and 0x80 != 0) 1.0 else 0.0) }
                     }
+                    requests++
+                }
+                // sensores personalizados em rodízio (1 por ciclo no CAN, a cada 3 na linha K)
+                val customs = CustomPids.list.value
+                if (customs.isNotEmpty() && (multiPid || tick % 3 == 1)) {
+                    val p = customs[(tick / (if (multiPid) 1 else 3)) % customs.size]
+                    val (value, _) = CustomPids.read(elm, p, _vehicle.value.protocol.contains("29"))
+                    if (value != null) _values.update { it + (p.key to value) }
                     requests++
                 }
                 tick++
@@ -549,11 +561,13 @@ object ObdManager {
             base += 0x20
         }
         val vin = readVin()
+        val ecuName = readAscii("090A", "490A")
+        val calId = readAscii("0904", "4904")
         val fuel = if (0x51 in supported) elm.readPid("51")?.getOrNull(0) else null
         multiPid = can && runCatching {
             parseMulti(elm.send("010C0D")).keys.containsAll(listOf(0x0C, 0x0D))
         }.getOrDefault(false)
-        val info = VehicleInfo(protocolName(dp, dpn), can, supported, vin, fuel)
+        val info = VehicleInfo(protocolName(dp, dpn), can, supported, vin, fuel, ecuName, calId)
         _vehicle.value = info
         _fuelType.value = fuel
         // CAN aguenta temporização agressiva: mais leituras por segundo
@@ -565,6 +579,15 @@ object ObdManager {
         loadDiag()
         log("Veículo: ${info.maker ?: "fabricante ?"} ${info.year ?: ""} · ${info.protocol} · " +
             "${supported.size} PIDs · VIN ${vin ?: "—"} · pedidos agrupados: ${if (multiPid) "sim" else "não"}")
+    }
+
+    /** Texto ASCII do modo 09 (nome da central, calibração). */
+    private suspend fun readAscii(cmd: String, prefix: String): String? {
+        val resp = elm.send(cmd, 4000)
+        if (Elm327.isError(resp)) return null
+        val hex = Elm327.joinFrames(resp).replace(Regex(prefix + "[0-9A-F]{2}"), "")
+        return hex.chunked(2).mapNotNull { it.toIntOrNull(16) }.filter { it in 0x20..0x7E }
+            .joinToString("") { it.toChar().toString() }.trim().takeIf { it.length >= 3 }
     }
 
     private suspend fun readVin(): String? {
@@ -639,6 +662,25 @@ object ObdManager {
         val v = _values.value
         val s = Sample(System.currentTimeMillis(), v["rpm"], v["speed"], v["o2s1"])
         _history.update { (it + s).takeLast(300) }
+        v.forEach { (k, x) ->
+            val q = series.getOrPut(k) { ArrayDeque() }
+            q.addLast(x); while (q.size > 400) q.removeFirst()
+        }
+        _seriesTick.value = _seriesTick.value + 1
+    }
+
+    /** Histórico recente de todos os valores lidos (para os gráficos). */
+    val series = HashMap<String, ArrayDeque<Double>>()
+    private val _seriesTick = MutableStateFlow(0)
+    val seriesTick: StateFlow<Int> = _seriesTick.asStateFlow()
+
+    /** Chaves lidas com prioridade (tela de gráficos). */
+    @Volatile var focus: Set<String> = emptySet()
+
+    /** Lê um PID personalizado uma vez, para testar a fórmula. */
+    fun testCustom(p: CustomPid, onResult: (Double?, String) -> Unit) = exclusive("Testando ${p.name}…") {
+        val (v, raw) = CustomPids.read(elm, p, _vehicle.value.protocol.contains("29"))
+        onResult(v, raw)
     }
 
     // ------------------------------------------------------------- operações exclusivas

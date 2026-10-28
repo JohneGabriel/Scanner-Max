@@ -47,13 +47,31 @@ class Elm327(private val log: (String) -> Unit) {
     }
 
     /** Configuração inicial recomendada para leitura rápida e fácil de interpretar. */
-    suspend fun init(): String {
+    /**
+     * [forcedProtocol]: "0" = automático, ou o número do ATSP (1–9, A). [extra]: comandos AT
+     * que o usuário quer mandar na conexão (separados por ; ou linha), para adaptadores e carros
+     * que precisam de ajuste fino.
+     */
+    suspend fun init(forcedProtocol: String = "0", extra: String = ""): String {
         send("ATZ", timeoutMs = 3000)  // reset
         val version = send("ATI")      // versão relatada (clones dizem v1.5 ou v2.1)
         setupDefaults()
         profile = AdapterProfile.detect(this, link?.kind)
         log("Adaptador: ${profile.summary}")
-        send("0100", timeoutMs = 8000) // força a detecção agora (a primeira vez demora)
+        if (forcedProtocol != "0") send("ATSP$forcedProtocol")
+        extra.split(';', '\n').map { it.trim().uppercase() }.filter { it.isNotEmpty() }.forEach { send(it, 3000) }
+        // força a detecção agora (a primeira vez demora)
+        var first = send("0100", timeoutMs = 8000)
+        // a busca automática falha em alguns carros/clones: tenta protocolo por protocolo
+        if (forcedProtocol == "0" && !first.replace(" ", "").contains("4100")) {
+            log("Detecção automática não achou o protocolo; testando um a um…")
+            for (n in listOf("6", "8", "7", "9", "5", "4", "3", "1", "2")) {
+                send("ATSP$n")
+                first = send("0100", timeoutMs = 6000)
+                if (first.replace(" ", "").contains("4100")) { log("Protocolo $n respondeu"); break }
+            }
+            if (!first.replace(" ", "").contains("4100")) send("ATSP0")
+        }
         val proto = send("ATDP")
         log("Protocolo: $proto")
         return version.lines().lastOrNull { it.isNotBlank() } ?: version

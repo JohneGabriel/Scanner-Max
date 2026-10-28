@@ -117,7 +117,7 @@ fun TripsScreen(app: AppActions) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     StatCard("Viagens", "${tot.count}", Modifier.weight(1f))
                     StatCard("Temp. média", tot.avgCoolant?.let { "${it.toInt()} °C" } ?: "—", Modifier.weight(1f), icon = Icons.Filled.Thermostat)
-                    StatCard("Parado", if (tot.runSec > 0) "${(tot.idleSec / tot.runSec * 100).toInt()}%" else "—", Modifier.weight(1f))
+                    StatCard("CO₂", "%.0f kg".format(tot.liters * br.obd.app.co2PerLiter(veh)), Modifier.weight(1f))
                 }
                 val kpl = list.take(12).reversed().map { it.kmPerL }
                 if (kpl.count { it != null } >= 2) {
@@ -222,6 +222,7 @@ fun TripDetailScreen(id: Long, app: AppActions) {
             KeyValue("Corte de combustível (descidas)", Reports.hm(t.fuelCutSec))
             KeyValue("Acelerações bruscas", "${t.hardAccel}", if (t.hardAccel > 3) Warn else null)
             KeyValue("Frenagens bruscas", "${t.hardBrake}", if (t.hardBrake > 3) Warn else null)
+            KeyValue("CO₂ emitido (estimado)", "%.1f kg".format(t.liters * br.obd.app.co2PerLiter(profile)))
             t.minBattery?.let { KeyValue("Bateria (mín. / média)", "${Reports.num(it)} / ${Reports.num(t.avgBattery)} V", if (it < 12.5) Warn else null) }
             val eco = ecoScore(t)
             Callout("Nota de condução econômica: $eco/100. " + ecoTip(t), if (eco >= 75) Tone.GOOD else if (eco >= 50) Tone.INFO else Tone.WARN)

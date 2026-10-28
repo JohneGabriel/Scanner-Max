@@ -70,6 +70,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.drawscope.inset
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -120,6 +121,14 @@ val THEMES = listOf(
     AppPalette("Pôr do sol", Color(0xFFFF7A59), Color(0xFFFFD166), Color(0xFF140C0A), Color(0xFF211512), Color(0xFF2A1B17), Color(0xFF35231E), Color(0xFF473029), Color(0xFFF7EAE5), Color(0xFFB59D94)),
     AppPalette("AMOLED", Color(0xFFFFA726), Color(0xFF4DD0E1), Color(0xFF000000), Color(0xFF0B0B0B), Color(0xFF121212), Color(0xFF1A1A1A), Color(0xFF262626), Color(0xFFEDEDED), Color(0xFF9A9A9A)),
     AppPalette("Claro", Color(0xFFE67E00), Color(0xFF0097A7), Color(0xFFF3F5F8), Color(0xFFFFFFFF), Color(0xFFF0F2F5), Color(0xFFE6E9EE), Color(0xFFD5DAE1), Color(0xFF151A21), Color(0xFF5F6B78), dark = false),
+    AppPalette("Céu", Color(0xFF1E6FE0), Color(0xFF00A3A3), Color(0xFFF1F5FB), Color(0xFFFFFFFF), Color(0xFFEDF2FA), Color(0xFFE1E9F5), Color(0xFFCBD7EA), Color(0xFF0F1B2D), Color(0xFF5B6B82), dark = false),
+    AppPalette("Menta", Color(0xFF0E9F6E), Color(0xFF2563EB), Color(0xFFF0F7F4), Color(0xFFFFFFFF), Color(0xFFEAF4EF), Color(0xFFDDEDE5), Color(0xFFC6DFD2), Color(0xFF10201A), Color(0xFF5A7268), dark = false),
+    AppPalette("Lavanda", Color(0xFF7C4DDB), Color(0xFFE0518F), Color(0xFFF5F3FB), Color(0xFFFFFFFF), Color(0xFFF0ECF9), Color(0xFFE5DFF4), Color(0xFFD3CAEB), Color(0xFF1C1530), Color(0xFF6A6280), dark = false),
+    AppPalette("Areia", Color(0xFFB8621B), Color(0xFF4F7A2A), Color(0xFFF7F3EC), Color(0xFFFFFDF9), Color(0xFFF2EDE3), Color(0xFFE9E1D3), Color(0xFFD9CDB9), Color(0xFF241C12), Color(0xFF75695A), dark = false),
+    AppPalette("Cereja", Color(0xFFD62F4B), Color(0xFFE08A00), Color(0xFFFBF2F3), Color(0xFFFFFFFF), Color(0xFFF7EAEC), Color(0xFFF0DDE0), Color(0xFFE3C6CB), Color(0xFF2A1215), Color(0xFF7D6064), dark = false),
+    AppPalette("Papel", Color(0xFF222831), Color(0xFFE67E00), Color(0xFFF6F6F4), Color(0xFFFFFFFF), Color(0xFFF0F0ED), Color(0xFFE6E6E2), Color(0xFFD4D4CF), Color(0xFF161616), Color(0xFF6B6B66), dark = false),
+    AppPalette("Grafite azul", Color(0xFF64B5F6), Color(0xFFFFB74D), Color(0xFF0B0F14), Color(0xFF131A22), Color(0xFF19222C), Color(0xFF202A36), Color(0xFF2C3846), Color(0xFFE6EDF3), Color(0xFF8FA0B2)),
+    AppPalette("Neon", Color(0xFFC6FF00), Color(0xFF00E5FF), Color(0xFF07080A), Color(0xFF101215), Color(0xFF16191D), Color(0xFF1D2126), Color(0xFF2A2F36), Color(0xFFEDEFF2), Color(0xFF9097A0)),
 )
 
 /** Tema atual, global e observável: mudar aqui recolore o app inteiro na hora. */
@@ -156,7 +165,7 @@ private val AppTypography = Typography().let { t ->
 fun ScannerTheme(content: @Composable () -> Unit) {
     val p = ThemeState.current
     val scheme = if (p.dark) darkColorScheme(
-        primary = p.accent, onPrimary = Color(0xFF14100A),
+        primary = p.accent, onPrimary = if (p.accent.luminance() > 0.5f) Color(0xFF14100A) else Color.White,
         primaryContainer = p.accent.copy(alpha = 0.18f).compositeOver(p.surface), onPrimaryContainer = p.text,
         secondary = p.accent2, secondaryContainer = p.accent2.copy(alpha = 0.18f).compositeOver(p.surface), onSecondaryContainer = p.text,
         background = p.bg, onBackground = p.text, surface = p.bg, onSurface = p.text,

@@ -89,6 +89,33 @@ object Pids {
     val TORQUE_DEMAND = PidDef("61", "torqueDemand", "Torque pedido", "%") { d -> a(d)?.minus(125) }
     val TORQUE_ACTUAL = PidDef("62", "torqueActual", "Torque real", "%") { d -> a(d)?.minus(125) }
     val TORQUE_REF = PidDef("63", "torqueRef", "Torque de referência", "Nm", 2) { ab(it) }
+    private fun wbl(d: IntArray) = ab(d)?.times(2)?.div(65536)
+    val WB2 = PidDef("25", "wb2", "Lambda sensor 2", "λ", 4, 3) { wbl(it) }
+    val WB3 = PidDef("26", "wb3", "Lambda sensor 3", "λ", 4, 3) { wbl(it) }
+    val WB4 = PidDef("27", "wb4", "Lambda sensor 4", "λ", 4, 3) { wbl(it) }
+    val WB5 = PidDef("28", "wb5", "Lambda sensor 5", "λ", 4, 3) { wbl(it) }
+    val WBI2 = PidDef("35", "wbi2", "Lambda (corrente) sensor 2", "λ", 4, 3) { wbl(it) }
+    val WBI5 = PidDef("38", "wbi5", "Lambda (corrente) sensor 5", "λ", 4, 3) { wbl(it) }
+    val MAF_MAX = PidDef("50", "mafMax", "Fluxo de ar máximo", "g/s", 4) { d -> a(d)?.times(10) }
+    val EVAP_ABS = PidDef("53", "evapAbs", "Pressão absoluta EVAP", "kPa", 2, 1) { d -> ab(d)?.div(200) }
+    val SEC_O2_STFT1 = PidDef("55", "secStft1", "Correção curta sonda traseira B1", "%", 0, 1) { d -> d.getOrNull(0)?.let { trim(it) } }
+    val SEC_O2_LTFT1 = PidDef("56", "secLtft1", "Correção longa sonda traseira B1", "%", 0, 1) { d -> d.getOrNull(0)?.let { trim(it) } }
+    val RAIL_ABS = PidDef("59", "railAbs", "Pressão absoluta no trilho", "kPa", 2) { d -> ab(d)?.times(10) }
+    val COOLANT2 = PidDef("67", "coolant2", "Temp. do motor (sensor 1)", "°C", 3) { d -> d.getOrNull(1)?.minus(40)?.toDouble() }
+    val IAT2 = PidDef("68", "iat2", "Temp. de admissão (sensor 1)", "°C", 7) { d -> d.getOrNull(1)?.minus(40)?.toDouble() }
+    val TURBO_IN = PidDef("6F", "turboIn", "Pressão na entrada do turbo", "kPa", 3) { d -> d.getOrNull(1)?.toDouble() }
+    val BOOST = PidDef("70", "boost", "Pressão do turbo (comandada)", "kPa", 10, 1) { d ->
+        if (d.size >= 3) (d[1] * 256 + d[2]) * 0.03125 else null
+    }
+    val EXHAUST_PRESS = PidDef("73", "exhaustPress", "Pressão do escapamento", "kPa", 5, 1) { d ->
+        if (d.size >= 3) (d[1] * 256 + d[2]) * 0.01 else null
+    }
+    val DPF_TEMP = PidDef("7C", "dpfTemp", "Temp. do filtro de partículas", "°C", 9) { d ->
+        if (d.size >= 3) (d[1] * 256 + d[2]) / 10.0 - 40 else null
+    }
+    val MANIFOLD_TEMP = PidDef("84", "manifoldTemp", "Temp. da superfície do coletor", "°C") { d -> a(d)?.minus(40) }
+    val FRICTION = PidDef("8E", "friction", "Torque de atrito do motor", "%") { d -> a(d)?.minus(125) }
+    val CYL_FUEL = PidDef("A2", "cylFuel", "Combustível por cilindro", "mg", 2, 1) { d -> ab(d)?.div(32) }
     val ODOMETER = PidDef("A6", "odometer", "Hodômetro", "km", 4, 1) { d ->
         if (d.size < 4) null else ((d[0].toLong() shl 24) or (d[1].toLong() shl 16) or (d[2].toLong() shl 8) or d[3].toLong()) / 10.0
     }
@@ -101,6 +128,8 @@ object Pids {
         O2B1S3, O2B1S4, O2B2S1, O2B2S2, RAIL_REL, EGR_ERR, EVAP_PRESS, CAT_B2S1, CAT_B1S2, CAT_B2S2,
         THROTTLE_B, THROTTLE_C, PEDAL_E, PEDAL_F, THROTTLE_CMD, PEDAL_REL, HYBRID_BATT, INJ_TIMING,
         TORQUE_DEMAND, TORQUE_ACTUAL, TORQUE_REF,
+        WB2, WB3, WB4, WB5, WBI2, WBI5, MAF_MAX, EVAP_ABS, SEC_O2_STFT1, SEC_O2_LTFT1, RAIL_ABS, COOLANT2, IAT2,
+        TURBO_IN, BOOST, EXHAUST_PRESS, DPF_TEMP, MANIFOLD_TEMP, FRICTION, CYL_FUEL,
     ).sortedBy { it.pidInt }
     val byKey = ALL.associateBy { it.key }
     val byPid = ALL.associateBy { it.pidInt }
@@ -141,6 +170,9 @@ data class VehicleInfo(
     val supported: Set<Int> = emptySet(),
     val vin: String? = null,
     val fuelType: Int? = null,
+    /** Nome da central (modo 09, 0A) e identificação da calibração (09, 04). */
+    val ecuName: String? = null,
+    val calId: String? = null,
 ) {
     val maker get() = vin?.let { Vin.maker(it) }
     val year get() = vin?.let { Vin.year(it) }
