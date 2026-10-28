@@ -12,6 +12,7 @@ import android.graphics.RectF
 import android.os.SystemClock
 import android.view.View
 import android.widget.RemoteViews
+import br.obd.app.ui.MainActivity
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
@@ -82,8 +83,8 @@ class ObdService : Service() {
         val busy = m.busy.value
         val status = m.status.value
         val rec = m.recording.value
-        val br = Locale("pt", "BR")
-        fun f(key: String, pattern: String) = v[key]?.let { String.format(br, pattern, it) }
+        val ptBr = Locale("pt", "BR")
+        fun f(key: String, pattern: String) = v[key]?.let { String.format(ptBr, pattern, it) }
 
         val rpm = v["rpm"]
         val noResponse = status.startsWith("Sem resposta") || status.startsWith("Carro sem resposta")
@@ -95,7 +96,7 @@ class ObdService : Service() {
             rec != null -> "Gravando viagem"
             else -> "Motor ligado"
         }
-        val rpmText = rpm?.let { String.format(br, "%.0f rpm", it) } ?: "— rpm"
+        val rpmText = rpm?.let { String.format(ptBr, "%.0f rpm", it) } ?: "— rpm"
         val temp = f("coolant", "%.0f °C"); val speed = f("speed", "%.0f km/h")
         val batt = f("battery", "%.1f V"); val ltft = v["ltft"]
         val gauge = gaugeBitmap(((rpm ?: 0.0) / 7000).toFloat(), (rpm ?: 0.0) >= 6000)
@@ -106,7 +107,7 @@ class ObdService : Service() {
             setTextViewText(R.id.rpm, rpmText)
             setTextViewText(R.id.line, listOfNotNull(temp, speed, batt).joinToString("  ·  ").ifEmpty { state })
             if (ltft != null) {
-                setTextViewText(R.id.badge, String.format(br, "%+.1f%%", ltft))
+                setTextViewText(R.id.badge, String.format(ptBr, "%+.1f%%", ltft))
                 setTextColor(R.id.badge, trimColor(ltft))
             } else setViewVisibility(R.id.badge, View.GONE)
         }
@@ -127,7 +128,7 @@ class ObdService : Service() {
             cell(temp, "motor", coolant?.let { if (it > 105) RED else if (it < 70) CYAN else null })
             cell(speed, "velocidade")
             cell(batt, "bateria", battery?.let { if (it < 12.0 || it > 14.8) AMBER else null })
-            cell(ltft?.let { String.format(br, "%+.1f%%", it) }, "corr. longa", ltft?.let { trimColor(it) })
+            cell(ltft?.let { String.format(ptBr, "%+.1f%%", it) }, "corr. longa", ltft?.let { trimColor(it) })
             if (rec != null) {
                 setViewVisibility(R.id.recRow, View.VISIBLE)
                 val base = SystemClock.elapsedRealtime() - (System.currentTimeMillis() - m.recordingStartedAt)
@@ -137,7 +138,7 @@ class ObdService : Service() {
 
         val open = PendingIntent.getActivity(
             this, 0,
-            Intent(this, br.obd.app.ui.MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE,
         )
         fun action(a: String, code: Int) = PendingIntent.getService(
