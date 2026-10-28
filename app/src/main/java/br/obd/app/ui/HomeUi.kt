@@ -330,7 +330,23 @@ private fun LiveDashboard(app: AppActions) {
     val diesel = Pids.isDiesel(veh.fuelType)
     fun has(d: PidDef) = if (veh.supported.isEmpty()) d in listOf(Pids.RPM, Pids.SPEED, Pids.COOLANT, Pids.LOAD, Pids.THROTTLE, Pids.MAP, Pids.IAT) else veh.has(d)
 
+    val link by ObdManager.link.collectAsState()
     ScreenColumn {
+        // modo demonstração: sempre visível e com saída clara
+        if (link?.kind == br.obd.app.link.LinkKind.DEMO) {
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Cyan.copy(alpha = 0.14f)).padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.PlayCircle, null, Modifier.size(20.dp), tint = Cyan)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Modo demonstração", style = MaterialTheme.typography.titleSmall, color = Cyan, maxLines = 1)
+                    Text("Dados simulados, não é o seu carro.", style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Button(onClick = { ObdManager.disconnect() }, colors = ButtonDefaults.buttonColors(containerColor = Cyan)) { BtnLabel("Sair") }
+            }
+        }
         // alertas
         alerts.forEach { a -> AlertBanner(a) }
 
@@ -440,8 +456,8 @@ private fun LiveDashboard(app: AppActions) {
         }
 
         // ações rápidas conectado
-        AdaptiveGrid(listOf(
-            Triple(Icons.Filled.Warning, "Ler códigos") { app.nav.home(3); ObdManager.readDiagnostics() },
+        AdaptiveGrid(listOf<Triple<ImageVector, String, () -> Unit>>(
+            Triple(Icons.Filled.Warning, "Ler códigos") { app.nav.home(3); ObdManager.readDiagnostics(); Unit },
             Triple(Icons.Filled.BatteryChargingFull, "Bateria") { app.nav.go("test", "battery") },
             Triple(Icons.Filled.Timer, "0–100") { app.nav.go("perf") },
         ), minCell = 96.dp, maxCols = 3) { (icon, label, action), m -> ActionTile(icon, label, m, onClick = action) }

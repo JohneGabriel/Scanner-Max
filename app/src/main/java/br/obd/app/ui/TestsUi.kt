@@ -34,6 +34,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Compress
+import androidx.compose.material.icons.filled.DeviceThermostat
+import androidx.compose.material.icons.filled.LinearScale
+import androidx.compose.material.icons.filled.LocalFireDepartment
+import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PictureAsPdf
@@ -90,6 +95,11 @@ fun testIcon(id: String): ImageVector = when (id) {
     "lambda" -> Icons.Filled.Sensors
     "idle" -> Icons.Filled.Speed
     "decel" -> Icons.Filled.ShowChart
+    "cooling" -> Icons.Filled.Thermostat
+    "temps" -> Icons.Filled.DeviceThermostat
+    "map" -> Icons.Filled.Compress
+    "tps" -> Icons.Filled.LinearScale
+    "misfire" -> Icons.Filled.LocalFireDepartment
     else -> Icons.Filled.Science
 }
 
@@ -182,6 +192,10 @@ private fun TestIntro(def: TestDef, error: String?) {
         Need.STOPPED -> v["speed"]?.let { it < 1 } ?: true
         Need.NARROW_O2 -> veh.supported.isEmpty() || veh.has(Pids.O2S1)
         Need.VOLTAGE -> adapter.features.isEmpty() || adapter.canReadVoltage
+        Need.MAP_SENSOR -> veh.supported.isEmpty() || veh.has(Pids.MAP)
+        Need.THROTTLE_SENSOR -> veh.supported.isEmpty() || veh.has(Pids.THROTTLE)
+        Need.CAN -> if (veh.supported.isEmpty()) null else veh.isCan
+        Need.COLD -> v["coolant"]?.let { it < 45 }
     }
     val hardFail = def.needs.any { it.hard && met(it) == false }
 
@@ -200,10 +214,8 @@ private fun TestIntro(def: TestDef, error: String?) {
         Section("Antes de começar", icon = Icons.Filled.CheckCircle) {
             NeedRow("Conectado ao carro", connected)
             def.needs.forEach { n -> NeedRow(n.label + if (n == Need.ENGINE_RUNNING || n == Need.WARM) live(n, v) else "", met(n)) }
-            if (hardFail) Callout(when {
-                def.needs.contains(Need.NARROW_O2) -> "Este carro não informa a sonda lambda comum pelo OBD (ou usa sonda de banda larga). O teste não se aplica."
-                else -> "Este adaptador não lê a tensão da bateria (comando ATRV), então o teste não funciona com ele."
-            }, Tone.WARN)
+            if (hardFail) Callout("Este teste não se aplica aqui: " +
+                def.needs.filter { it.hard && met(it) == false }.joinToString("; ") { it.label.replaceFirstChar { c -> c.lowercase() } } + " — não atendido.", Tone.WARN)
         }
         if (def.options.isNotEmpty()) {
             Section("Situação", icon = Icons.Filled.Tune) {
@@ -286,6 +298,7 @@ private fun TestRunning(def: TestDef) {
             }
         }
         if (s.chart.size >= 2) AppCard { LineChart(s.chart, min = s.chartMin, max = s.chartMax, reference = s.chartRef, color = urgentColor, height = 110) }
+        if (s.testId == "cooling") Button(onClick = { TestRunner.requestFinish() }, modifier = Modifier.fillMaxWidth()) { BtnLabel("Encerrar e ver o resultado") }
         OutlinedButton(onClick = { TestRunner.cancel() }, modifier = Modifier.fillMaxWidth()) { BtnLabel("Cancelar teste") }
     }
 }

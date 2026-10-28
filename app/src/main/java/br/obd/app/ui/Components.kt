@@ -629,8 +629,9 @@ fun Hint(text: String, modifier: Modifier = Modifier) =
 fun KeyValue(key: String, value: String, valueColor: Color? = null) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Text(key, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+        Spacer(Modifier.width(12.dp))
         Text(value, style = MaterialTheme.typography.bodyMedium.merge(Tabular), fontWeight = FontWeight.Medium,
-            color = valueColor ?: MaterialTheme.colorScheme.onSurface, textAlign = TextAlign.End)
+            color = valueColor ?: MaterialTheme.colorScheme.onSurface, textAlign = TextAlign.End, modifier = Modifier.weight(1f, fill = false))
     }
 }
 

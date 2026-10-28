@@ -25,6 +25,10 @@ enum class Need(val label: String, val hard: Boolean) {
     STOPPED("Carro parado", false),
     NARROW_O2("Carro com sonda lambda comum", true),
     VOLTAGE("Adaptador lê a tensão (ATRV)", true),
+    MAP_SENSOR("Carro informa a pressão do coletor", true),
+    THROTTLE_SENSOR("Carro informa a posição da borboleta", true),
+    CAN("Carro com protocolo CAN", true),
+    COLD("Motor frio (parado há algumas horas)", false),
 }
 
 /** Descrição de um teste guiado (a tela de introdução mostra tudo isto). */
@@ -153,7 +157,44 @@ object TestCatalog {
             "Depois, ligue faróis, ventilação no máximo e desembaçador quando pedir"),
         listOf(Need.VOLTAGE, Need.ENGINE_OFF),
     )
-    val ALL = listOf(BATTERY, MIXTURE, LAMBDA, IDLE, DECEL)
+    val COOLING = TestDef(
+        "cooling", "Arrefecimento", "Termostato, ventoinha e superaquecimento", "até 12 min",
+        "Acompanha a temperatura do motor em lenta: quanto tempo leva para aquecer (termostato preso aberto demora " +
+            "demais), se ela estabiliza quando o termostato abre e se a ventoinha liga e derruba a temperatura antes de passar do ponto.",
+        listOf("Comece com o motor frio, se puder (dá para rodar quente também)", "Deixe em lenta, carro parado, capô fechado",
+            "O teste termina sozinho quando vê a ventoinha trabalhar, ou toque em Encerrar"),
+        listOf(Need.ENGINE_RUNNING, Need.STOPPED),
+    )
+    val TEMPS = TestDef(
+        "temps", "Sensores de temperatura", "Motor, ar e ambiente batem entre si?", "10 s",
+        "Com o motor frio (parado há algumas horas), todos os sensores de temperatura devem marcar quase o mesmo valor. " +
+            "Um sensor lendo diferente engana a central: partida difícil, consumo alto, ventoinha fora de hora.",
+        listOf("Faça com o motor frio: de manhã, antes da primeira partida", "Ligue só a ignição"),
+        listOf(Need.ENGINE_OFF, Need.COLD),
+    )
+    val MAP = TestDef(
+        "map", "Sensor de pressão (MAP)", "Vácuo do motor e calibração do sensor", "≈ 40 s",
+        "Com o motor desligado, o sensor deve marcar a pressão do ar ambiente. Em lenta, um motor saudável puxa vácuo " +
+            "(25–40 kPa). Numa acelerada rápida a pressão sobe e, ao soltar, cai abaixo da lenta. Mostra entrada de ar, " +
+            "sensor descalibrado e restrições.",
+        listOf("Comece com a ignição ligada e o motor DESLIGADO", "Ligue o motor quando o app pedir", "Dê uma acelerada rápida e solte quando pedir"),
+        listOf(Need.MAP_SENSOR, Need.ENGINE_OFF, Need.STOPPED),
+    )
+    val TPS = TestDef(
+        "tps", "Pedal e borboleta", "Falhas no sensor de posição (pontos mortos)", "15 s",
+        "Lê a posição da borboleta enquanto você pisa e solta o pedal devagar. A curva deve subir e descer lisa: " +
+            "saltos e quedas no meio do curso indicam pista gasta no sensor — causa clássica de trancos e engasgos.",
+        listOf("Motor DESLIGADO, ignição ligada", "Quando começar, pise devagar até o fim (uns 5 s)", "Solte devagar (mais uns 5 s)"),
+        listOf(Need.THROTTLE_SENSOR, Need.ENGINE_OFF),
+    )
+    val MISFIRE = TestDef(
+        "misfire", "Falhas de combustão", "Contagem por cilindro, direto da central", "≈ 30 s",
+        "Carros CAN contam as falhas de combustão de cada cilindro. O teste deixa o motor em lenta e lê esses contadores: " +
+            "aponta o cilindro com problema antes de acender a luz de injeção.",
+        listOf("Motor quente, em lenta", "Não acelere durante o teste"),
+        listOf(Need.CAN, Need.ENGINE_RUNNING, Need.STOPPED),
+    )
+    val ALL = listOf(BATTERY, MIXTURE, LAMBDA, IDLE, DECEL, COOLING, MISFIRE, MAP, TPS, TEMPS)
     fun byId(id: String) = ALL.firstOrNull { it.id == id }
 }
 
@@ -175,6 +216,10 @@ object TestRunner {
 
     private var job: Job? = null
 
+    /** Pedido para encerrar um teste longo e analisar o que já foi medido. */
+    @Volatile private var finishRequested = false
+    fun requestFinish() { finishRequested = true }
+
     fun init(ctx: Context) {
         dir = File(ctx.filesDir, "tests").apply { mkdirs() }
         _history.value = (dir.listFiles() ?: emptyArray())
@@ -194,7 +239,7 @@ object TestRunner {
 
     fun start(def: TestDef, option: String? = null) {
         if (_live.value != null) return
-        _result.value = null; _error.value = null
+        _result.value = null; _error.value = null; finishRequested = false
         _live.value = TestLive(def.id, 1, 1, "Preparando…", "Reservando o adaptador para o teste", "—", "", 0f, null)
         val j = ObdManager.exclusive("Teste: ${def.title}") {
             try {
@@ -204,6 +249,11 @@ object TestRunner {
                     "decel" -> decel()
                     "mixture" -> mixture()
                     "battery" -> battery()
+                    "cooling" -> cooling()
+                    "temps" -> temps()
+                    "map" -> mapTest()
+                    "tps" -> tps()
+                    "misfire" -> misfire()
                     else -> null
                 }
                 if (r != null) save(r)
@@ -757,6 +807,327 @@ object TestRunner {
         if (steps.isEmpty()) steps += "Nada a fazer"
         return report(def, level, head, expl, metrics, steps, trace, "Tensão (V)", 9.0, 15.0, 12.4, null,
             mapOf("rest" to (rest ?: Double.NaN), "crank" to (crankMin ?: Double.NaN), "chg" to (charging ?: Double.NaN), "load" to (loaded ?: Double.NaN)))
+    }
+
+    // ------------------------------------------------------------------ arrefecimento
+
+    private suspend fun cooling(): TestReport {
+        val def = TestCatalog.COOLING
+        val temps = ArrayList<Double>()
+        val t0 = System.currentTimeMillis()
+        val start = pid(Pids.COOLANT)
+        var warmAt: Double? = null
+        var peak = -99.0
+        var cycles = 0
+        var falling = false
+        var maxSeen = start ?: 0.0
+        var stalled = false
+        elm.verbose = false
+        while (true) {
+            val el = (System.currentTimeMillis() - t0) / 1000.0
+            if (el > 12 * 60 || finishRequested) break
+            val c = pid(Pids.COOLANT)
+            if (c != null) {
+                temps += c
+                maxSeen = maxOf(maxSeen, c)
+                if (warmAt == null && c >= 80) warmAt = el
+                // ventoinha: queda de 2 °C depois de um pico acima de 88 °C
+                if (c > peak) { peak = c; falling = false }
+                if (!falling && peak >= 88 && c <= peak - 2) { cycles++; falling = true; peak = c; Feedback.step() }
+                if (c >= 112) break
+            }
+            if (temps.size % 5 == 0) { val r = pid(Pids.RPM); if (r != null && r < 250) { stalled = true; break } }
+            val msg = when {
+                (c ?: 0.0) >= 105 -> "Temperatura alta! Se passar de 110 °C, desligue."
+                cycles > 0 -> "Ventoinha detectada (${cycles}x). Toque em Encerrar quando quiser."
+                warmAt == null -> "Aquecendo… mantenha em lenta."
+                else -> "Aquecido. Esperando a ventoinha ligar…"
+            }
+            emit(def.id, if (warmAt == null) 1 else 2, 2, if (warmAt == null) "Aquecimento" else "Controle de temperatura", msg,
+                f0(c), "°C", if (warmAt == null) ((c ?: 0.0) / 80 * 0.5).toFloat() else (0.5 + minOf(cycles, 2) / 4.0).toFloat(),
+                null, (c ?: 0.0) >= 105, temps, 20.0, 120.0, 90.0)
+            if (cycles >= 2 && el > 60) break
+            delay(800)
+        }
+        elm.verbose = true
+        val el = (System.currentTimeMillis() - t0) / 1000.0
+        val cold = (start ?: 99.0) < 50
+        val rate = if (temps.size > 5) (temps.last() - temps.first()) / (el / 60) else null
+        val metrics = listOfNotNull(
+            Metric("Temperatura inicial", "${f0(start)} °C"),
+            Metric("Máxima", "${f0(maxSeen)} °C", if (maxSeen > 105) Level.BAD else if (maxSeen > 100) Level.WARN else Level.GOOD),
+            warmAt?.let { Metric("Tempo até 80 °C", Reports.hm(it), if (cold && it > 15 * 60) Level.WARN else null) },
+            rate?.let { Metric("Ritmo de aquecimento", "%.1f °C/min".format(it)) },
+            Metric("Ciclos da ventoinha", "$cycles", if (cycles > 0) Level.GOOD else null),
+            Metric("Duração", Reports.hm(el)),
+        )
+        val (level, head, expl, steps) = when {
+            maxSeen >= 108 -> Quad(Level.BAD, "Superaquecendo",
+                "A temperatura chegou a ${f0(maxSeen)} °C em lenta. O sistema de arrefecimento não está dando conta.",
+                listOf("Desligue e deixe esfriar antes de abrir o reservatório", "Confira o nível do líquido e vazamentos",
+                    "Teste a ventoinha, o relé e o fusível", "Verifique a bomba d'água e a válvula termostática"))
+            maxSeen > 100 && cycles == 0 -> Quad(Level.WARN, "Ventoinha não entrou a tempo",
+                "A temperatura passou de 100 °C sem a queda típica da ventoinha ligando.",
+                listOf("Verifique se a ventoinha gira (relé, fusível, motor)", "Confira o interruptor/sensor que comanda a ventoinha"))
+            cold && warmAt == null && el >= 10 * 60 -> Quad(Level.WARN, "Motor não aquece",
+                "Em ${Reports.hm(el)} de lenta o motor não chegou a 80 °C. Quase sempre é a válvula termostática presa aberta: consumo alto e desgaste.",
+                listOf("Troque a válvula termostática", "Confirme que o sensor de temperatura está certo (teste Sensores de temperatura)"))
+            cold && warmAt != null && warmAt > 15 * 60 -> Quad(Level.WARN, "Aquecimento lento",
+                "Levou ${Reports.hm(warmAt)} para chegar a 80 °C em lenta. Normal é algo entre 5 e 12 minutos.",
+                listOf("Verifique a válvula termostática"))
+            cycles > 0 -> Quad(Level.GOOD, "Arrefecimento funcionando",
+                "A temperatura estabilizou e a ventoinha ligou $cycles vez(es), segurando o motor em até ${f0(maxSeen)} °C." +
+                    (warmAt?.takeIf { cold }?.let { " Aqueceu até 80 °C em ${Reports.hm(it)}." } ?: ""),
+                listOf("Nada a fazer"))
+            stalled -> Quad(Level.INFO, "O motor desligou", "O teste parou porque o motor apagou.", listOf("Rode de novo com o motor em lenta"))
+            else -> Quad(Level.INFO, "Ainda sem conclusão",
+                "Máxima de ${f0(maxSeen)} °C sem ventoinha detectada. Deixe mais tempo em lenta para ela entrar.",
+                listOf("Repita deixando até a ventoinha ligar"))
+        }
+        return report(def, level, head, expl, metrics, steps, temps, "Temperatura do motor (°C)", 20.0, 120.0, 90.0, null,
+            mapOf("max" to maxSeen, "warm" to (warmAt ?: Double.NaN), "cycles" to cycles.toDouble()))
+    }
+
+    // ------------------------------------------------------------------ sensores de temperatura
+
+    private suspend fun temps(): TestReport {
+        val def = TestCatalog.TEMPS
+        val v = ObdManager.vehicle.value
+        fun has(d: PidDef) = v.supported.isEmpty() || v.has(d)
+        val read = LinkedHashMap<String, ArrayList<Double>>()
+        val defs = listOf(Pids.COOLANT, Pids.IAT, Pids.AMBIENT, Pids.OIL_TEMP).filter { it == Pids.COOLANT || it == Pids.IAT || v.has(it) }.filter { has(it) }
+        elm.verbose = false
+        repeat(5) { i ->
+            defs.forEach { d -> pid(d)?.let { read.getOrPut(d.label) { ArrayList() } += it } }
+            emit(def.id, 1, 1, "Lendo os sensores", "Ignição ligada, motor desligado.", "${(i + 1) * 20}", "%", (i + 1) / 5f, null)
+        }
+        val rpm = pid(Pids.RPM)
+        elm.verbose = true
+        val avg = read.mapValues { it.value.average() }
+        val coolant = avg[Pids.COOLANT.label]; val iat = avg[Pids.IAT.label]
+        val metrics = avg.map { (k, x) ->
+            Metric(k, "${f0(x)} °C", if (x <= -39 || x >= 140) Level.BAD else null)
+        }
+        val broken = avg.filter { it.value <= -39 || it.value >= 140 }.keys
+        val spread = if (avg.size >= 2) avg.values.max() - avg.values.min() else null
+        val (level, head, expl, steps) = when {
+            broken.isNotEmpty() -> Quad(Level.BAD, "Sensor com leitura impossível",
+                "${broken.joinToString()} marca um valor no limite da escala (-40 ou 140+ °C): fio aberto, em curto ou sensor queimado.",
+                listOf("Verifique o conector e o chicote do sensor indicado", "Meça a resistência do sensor", "Troque o sensor"))
+            (rpm ?: 0.0) >= 300 -> Quad(Level.INFO, "Motor ligado", "Este teste só faz sentido com o motor frio e desligado.", listOf("Repita de manhã, antes de dar a partida"))
+            coolant == null || iat == null -> Quad(Level.INFO, "Faltam leituras", "O carro não informou os dois sensores principais.", listOf("Repita o teste"))
+            coolant > 45 -> Quad(Level.INFO, "Motor ainda quente",
+                "O motor está a ${f0(coolant)} °C: os sensores só podem ser comparados com o motor frio.",
+                listOf("Repita depois de algumas horas parado"))
+            spread != null && spread <= 6 -> Quad(Level.GOOD, "Sensores coerentes",
+                "Todos marcaram entre ${f0(avg.values.min())} e ${f0(avg.values.max())} °C com o motor frio.", listOf("Nada a fazer"))
+            else -> Quad(Level.WARN, "Um sensor está lendo diferente",
+                "Com o motor frio, a diferença entre os sensores foi de ${f0(spread)} °C (motor ${f0(coolant)}, ar ${f0(iat)}). " +
+                    "O que destoa da temperatura ambiente é o suspeito.",
+                listOf("Compare com um termômetro: o sensor que mais se afasta do ambiente é o defeituoso",
+                    "Sensor do motor lendo baixo causa consumo alto e marcha lenta acelerada", "Verifique conectores antes de trocar"))
+        }
+        return report(def, level, head, expl, metrics, steps, emptyList(), "", raw = avg.mapKeys { it.key.take(12) })
+    }
+
+    // ------------------------------------------------------------------ MAP
+
+    private suspend fun mapTest(): TestReport {
+        val def = TestCatalog.MAP
+        val v = ObdManager.vehicle.value
+        val trace = ArrayList<Double>()
+        elm.verbose = false
+        var baro: Double? = if (v.has(Pids.BARO)) pid(Pids.BARO) else null
+        var off: Double? = null
+        val running0 = (pid(Pids.RPM) ?: 0.0) >= 400
+        if (!running0) {
+            val r = ArrayList<Double>()
+            val t0 = System.currentTimeMillis()
+            while (System.currentTimeMillis() - t0 < 5000) {
+                pid(Pids.MAP)?.let { r += it; trace += it }
+                val el = (System.currentTimeMillis() - t0) / 1000.0
+                emit(def.id, 1, 3, "Motor desligado", "Não dê a partida ainda.", f0(r.lastOrNull()), "kPa", (el / 5 * 0.25).toFloat(),
+                    (5 - el).toInt(), false, trace, 0.0, 110.0, baro)
+            }
+            off = r.averageOrNull()
+            if (baro == null) baro = off
+        }
+        // aguarda a partida
+        val t1 = System.currentTimeMillis()
+        var running = running0
+        while (!running && System.currentTimeMillis() - t1 < 40_000) {
+            val m = pid(Pids.MAP); m?.let { trace += it }
+            running = (pid(Pids.RPM) ?: 0.0) >= 400
+            emit(def.id, 2, 3, "Partida", "DÊ A PARTIDA e deixe em lenta", f0(m), "kPa", 0.3f, null, true, trace, 0.0, 110.0, baro)
+        }
+        val idle = ArrayList<Double>()
+        if (running) {
+            val t2 = System.currentTimeMillis()
+            while (System.currentTimeMillis() - t2 < 10_000) {
+                val m = pid(Pids.MAP) ?: continue
+                trace += m
+                val el = (System.currentTimeMillis() - t2) / 1000.0
+                if (el > 4) idle += m
+                emit(def.id, 2, 3, "Lenta", "Não acelere.", f0(m), "kPa", (0.35 + el / 10 * 0.3).toFloat(), (10 - el).toInt(), false, trace, 0.0, 110.0, baro)
+            }
+        }
+        val idleAvg = idle.averageOrNull()
+        var snapMax: Double? = null; var snapMin: Double? = null
+        if (running) {
+            val t3 = System.currentTimeMillis()
+            var seenHigh = false
+            while (System.currentTimeMillis() - t3 < 15_000) {
+                val m = pid(Pids.MAP) ?: continue
+                trace += m
+                snapMax = maxOf(snapMax ?: m, m)
+                if (idleAvg != null && m > idleAvg + 20) seenHigh = true
+                if (seenHigh) snapMin = minOf(snapMin ?: m, m)
+                val el = (System.currentTimeMillis() - t3) / 1000.0
+                emit(def.id, 3, 3, "Acelerada", if (!seenHigh) "ACELERE RÁPIDO E SOLTE" else "Solte e aguarde…", f0(m), "kPa",
+                    (0.7 + el / 15 * 0.3).toFloat(), (15 - el).toInt(), !seenHigh, trace, 0.0, 110.0, baro)
+                if (seenHigh && snapMin != null && idleAvg != null && m >= idleAvg - 2 && el > 4) break
+            }
+        }
+        elm.verbose = true
+        val vacuum = if (baro != null && idleAvg != null) baro - idleAvg else null
+        val metrics = listOfNotNull(
+            baro?.let { Metric("Pressão ambiente", "${f0(it)} kPa") },
+            off?.let { o -> Metric("MAP com motor desligado", "${f0(o)} kPa", baro?.let { b -> if (kotlin.math.abs(o - b) <= 4) Level.GOOD else Level.WARN }) },
+            idleAvg?.let { Metric("MAP em lenta", "${f0(it)} kPa", if (it in 20.0..42.0) Level.GOOD else Level.WARN) },
+            vacuum?.let { Metric("Vácuo em lenta", "${f0(it)} kPa", if (it >= 50) Level.GOOD else Level.WARN) },
+            snapMax?.let { Metric("Máximo na acelerada", "${f0(it)} kPa") },
+            snapMin?.let { Metric("Mínimo ao soltar", "${f0(it)} kPa", if (idleAvg != null && it < idleAvg) Level.GOOD else null) },
+        )
+        val (level, head, expl, steps) = when {
+            !running -> Quad(Level.INFO, "Partida não detectada", "Não deu para medir com o motor ligado.", listOf("Rode de novo e dê a partida quando o app pedir"))
+            off != null && baro != null && v.has(Pids.BARO) && kotlin.math.abs(off - baro) > 6 -> Quad(Level.WARN, "Sensor MAP descalibrado",
+                "Com o motor desligado, o MAP marcou ${f0(off)} kPa e a pressão ambiente é ${f0(baro)} kPa. Os dois deveriam ser iguais.",
+                listOf("Verifique a alimentação (5 V) e o aterramento do sensor", "Troque o sensor MAP se continuar"))
+            idleAvg != null && idleAvg > 45 -> Quad(Level.WARN, "Pouco vácuo em lenta",
+                "Em lenta o coletor ficou em ${f0(idleAvg)} kPa (o normal é 25–40). Tem ar entrando fora da borboleta, ou o motor está com falha/compressão baixa.",
+                listOf("Procure entradas de ar falsas: mangueiras, junta do coletor, servo-freio, cânister", "Rode o teste de Mistura e correções",
+                    "Se não achar vazamento, faça teste de compressão"))
+            snapMax != null && baro != null && snapMax < baro * 0.7 -> Quad(Level.WARN, "Acelerada fraca",
+                "Na acelerada o coletor só chegou a ${f0(snapMax)} kPa. Pode ter sido uma acelerada curta, ou há restrição na admissão.",
+                listOf("Repita acelerando mais fundo", "Verifique o filtro de ar e a abertura da borboleta"))
+            else -> Quad(Level.GOOD, "Sensor e vácuo normais",
+                "Vácuo de ${f0(vacuum)} kPa em lenta e resposta normal na acelerada.", listOf("Nada a fazer"))
+        }
+        return report(def, level, head, expl, metrics, steps, trace, "Pressão do coletor (kPa)", 0.0, 110.0, baro, null,
+            mapOf("idle" to (idleAvg ?: Double.NaN), "off" to (off ?: Double.NaN)))
+    }
+
+    // ------------------------------------------------------------------ pedal / borboleta
+
+    private suspend fun tps(): TestReport {
+        val def = TestCatalog.TPS
+        val v = ObdManager.vehicle.value
+        val samples = ArrayList<Double>()
+        elm.verbose = false
+        val t0 = System.currentTimeMillis()
+        val seconds = 15
+        var peakSeen = 0.0
+        while (true) {
+            val el = (System.currentTimeMillis() - t0) / 1000.0
+            if (el >= seconds) break
+            val x = pid(Pids.THROTTLE) ?: continue
+            samples += x
+            peakSeen = maxOf(peakSeen, x)
+            val instr = when {
+                el < 1.5 -> "Prepare-se…"
+                peakSeen < 50 -> "PISE DEVAGAR ATÉ O FIM"
+                else -> "Agora SOLTE DEVAGAR"
+            }
+            emit(def.id, 1, 1, "Curso do pedal", instr, f0(x), "%", (el / seconds).toFloat(), (seconds - el).toInt(), el >= 1.5 && el < 3,
+                samples, 0.0, 100.0)
+        }
+        elm.verbose = true
+        val closed = samples.take(4).averageOrNull()
+        val max = samples.maxOrNull()
+        // quedas bruscas no meio da subida/descida: pista gasta
+        var glitches = 0
+        for (i in 2 until samples.size) {
+            val a = samples[i - 2]; val b = samples[i - 1]; val c = samples[i]
+            val trendUp = c > a + 2; val trendDown = c < a - 2
+            if ((trendUp && b < a - 8) || (trendDown && b > a + 8) || (!trendUp && !trendDown && kotlin.math.abs(b - a) > 15 && kotlin.math.abs(c - a) < 4)) glitches++
+        }
+        val rate = samples.size / seconds.toDouble()
+        val metrics = listOfNotNull(
+            closed?.let { Metric("Fechada", "${f1(it)} %", if (it < 20) Level.GOOD else Level.WARN) },
+            max?.let { Metric("Máxima", "${f1(it)} %", if (it >= 70) Level.GOOD else Level.WARN) },
+            Metric("Saltos no curso", "$glitches", if (glitches == 0) Level.GOOD else Level.WARN),
+            Metric("Leituras por segundo", f1(rate)),
+        )
+        val (level, head, expl, steps) = when {
+            samples.size < 10 -> Quad(Level.INFO, "Poucas leituras", "O carro respondeu poucas vezes.", listOf("Repita o teste"))
+            (max ?: 0.0) - (closed ?: 0.0) < 10 -> Quad(Level.INFO, "A borboleta não se moveu",
+                "A leitura quase não mudou. Em alguns carros com acelerador eletrônico a borboleta não se move com o motor desligado — " +
+                    "nesse caso o teste não se aplica.", listOf("Confirme se pisou até o fim", "Se o carro tem cabo de acelerador e a leitura não mudou, verifique o sensor"))
+            glitches > 0 -> Quad(Level.WARN, "Saltos no sinal da borboleta",
+                "A leitura deu $glitches salto(s) no meio do curso. Sensor com a pista gasta faz a central ver a borboleta \"pular\": trancos, engasgos e lenta instável.",
+                listOf("Repita devagar para confirmar no mesmo ponto", "Limpe o conector do corpo de borboleta", "Troque o sensor (ou o corpo de borboleta, se for integrado)"))
+            (closed ?: 0.0) >= 20 -> Quad(Level.WARN, "Borboleta não fecha",
+                "Em repouso ela marca ${f1(closed)}%. Pode ser sujeira, cabo esticado ou adaptação errada.",
+                listOf("Limpe o corpo de borboleta", "Faça a adaptação da borboleta"))
+            else -> Quad(Level.GOOD, "Sinal liso de ponta a ponta",
+                "De ${f1(closed)}% a ${f1(max)}% sem saltos.", listOf("Nada a fazer"))
+        }
+        val note = if (rate < 5) "Com ~${f1(rate)} leituras/s, saltos muito rápidos podem passar despercebidos. Pise bem devagar." else null
+        return report(def, level, head, expl, metrics, steps, samples, "Posição da borboleta (%)", 0.0, 100.0, null, note,
+            mapOf("glitches" to glitches.toDouble()))
+    }
+
+    // ------------------------------------------------------------------ falhas de combustão (modo 06, CAN)
+
+    private suspend fun misfire(): TestReport {
+        val def = TestCatalog.MISFIRE
+        val rpms = ArrayList<Double>()
+        elm.verbose = false
+        val t0 = System.currentTimeMillis()
+        while (System.currentTimeMillis() - t0 < 20_000) {
+            val r = pid(Pids.RPM) ?: continue
+            rpms += r
+            val el = (System.currentTimeMillis() - t0) / 1000.0
+            emit(def.id, 1, 2, "Lenta", "Não acelere. A central está contando as falhas.", f0(r), "rpm", (el / 20 * 0.7).toFloat(),
+                (20 - el).toInt(), false, rpms, 0.0, 1500.0)
+            delay(200)
+        }
+        emit(def.id, 2, 2, "Lendo contadores", "Consultando cada cilindro…", "—", "", 0.85f, null)
+        val counts = LinkedHashMap<Int, Int>()
+        for (mid in 0xA2..0xAD) {
+            val bytes = Elm327.joinFrames(elm.send("06%02X".format(mid), 3000)).chunked(2).mapNotNull { it.toIntOrNull(16) }
+            var i = bytes.indexOf(0x46)
+            if (i < 0) { if (mid > 0xA5 && counts.isEmpty()) break else continue }
+            i++
+            var cur: Int? = null
+            while (i + 9 <= bytes.size && bytes[i] == mid) {
+                val tid = bytes[i + 1]
+                val value = bytes[i + 3] * 256 + bytes[i + 4]
+                if (tid == 0x0C || (tid == 0x0B && cur == null)) cur = value
+                i += 9
+            }
+            cur?.let { counts[mid - 0xA1] = it }
+        }
+        elm.verbose = true
+        val std = std(rpms)
+        val metrics = counts.map { (cyl, n) -> Metric("Cilindro $cyl", "$n falhas", if (n == 0) Level.GOOD else if (n < 10) Level.WARN else Level.BAD) } +
+            Metric("Oscilação da rotação", "±${f0(std)} rpm", if (std <= 40) Level.GOOD else Level.WARN)
+        val bad = counts.filter { it.value > 0 }
+        val (level, head, expl, steps) = when {
+            counts.isEmpty() -> Quad(Level.INFO, "A central não informa os contadores",
+                "Este carro não devolveu a contagem de falhas por cilindro (modo 06). A oscilação da rotação em lenta foi ±${f0(std)} rpm.",
+                listOf("Use o teste de Marcha lenta para avaliar a estabilidade"))
+            bad.isEmpty() -> Quad(Level.GOOD, "Nenhuma falha de combustão",
+                "Todos os ${counts.size} cilindros com zero falhas no último ciclo.", listOf("Nada a fazer"))
+            else -> Quad(if (bad.values.max() >= 10) Level.BAD else Level.WARN,
+                "Falhas no cilindro ${bad.keys.joinToString(", ")}",
+                "A central contou falhas de combustão em ${bad.entries.joinToString { "cilindro ${it.key} (${it.value})" }}. " +
+                    "Com falha concentrada num cilindro, o culpado costuma ser vela, bobina, cabo ou bico daquele cilindro.",
+                listOf("Troque a bobina (ou cabo) do cilindro com a de outro e repita: se a falha mudar de cilindro, é a bobina",
+                    "Faça o mesmo com a vela", "Se não mudar, teste o bico injetor e a compressão do cilindro"))
+        }
+        return report(def, level, head, expl, metrics, steps, rpms, "Rotação em lenta (rpm)", 0.0, 1500.0, null, null,
+            counts.mapKeys { "c${it.key}" }.mapValues { it.value.toDouble() })
     }
 
     /** Estado de carga aproximado de uma bateria de chumbo em repouso. */

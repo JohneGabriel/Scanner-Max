@@ -212,7 +212,7 @@ fun DiagnosticsScreen(app: AppActions) {
 }
 
 @Composable
-fun DtcRow(code: String, confirmed: Boolean, onClick: () -> Unit) {
+fun DtcRow(code: String, confirmed: Boolean, status: String? = if (confirmed) "confirmado" else "pendente", onClick: () -> Unit) {
     val det = remember(code) { DtcGuide.detail(code) }
     val c = if (confirmed) levelColor(det.level).takeIf { det.level != Level.INFO } ?: Bad else Warn
     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).pressable(onClick = onClick).padding(vertical = 6.dp),
@@ -223,7 +223,8 @@ fun DtcRow(code: String, confirmed: Boolean, onClick: () -> Unit) {
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(det.title, style = MaterialTheme.typography.bodyMedium, maxLines = 2)
-            Hint("${if (confirmed) "confirmado" else "pendente"} · ${det.system}")
+            Text(listOfNotNull(status, det.system).joinToString(" · "), style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         }
         Icon(Icons.Filled.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
@@ -292,13 +293,41 @@ fun LookupScreen(app: AppActions) {
                 Hint(d.system)
             }
         }
-        Section("Entendendo o código", icon = Icons.Filled.Lightbulb) {
-            KeyValue("1ª letra", "P motor/câmbio · C chassi · B carroceria · U rede")
-            KeyValue("2º dígito", "0 e 2 genérico · 1 e 3 do fabricante")
-            KeyValue("3º dígito (P)", "1–2 mistura/ar · 3 ignição · 4 emissões · 5 lenta/velocidade · 6 central · 7–9 câmbio")
+        Section("Como ler um código", icon = Icons.Filled.Lightbulb) {
+            CodeAnatomy()
+            CodePart("P", "Sistema", "P motor e câmbio · C chassi · B carroceria · U rede de módulos")
+            CodePart("0", "Tipo", "0 e 2 genéricos (iguais em todo carro) · 1 e 3 do fabricante")
+            CodePart("1", "Área (códigos P)", "1–2 ar e combustível · 3 ignição · 4 emissões · 5 lenta e velocidade · 6 central · 7–9 câmbio")
+            CodePart("71", "Falha", "O defeito específico dentro da área")
         }
         Section("Mais comuns", icon = Icons.Filled.DirectionsCar) {
-            common.forEach { c -> DtcRow(c, true) { app.nav.go("dtc", c) } }
+            common.forEach { c -> DtcRow(c, true, status = null) { app.nav.go("dtc", c) } }
+        }
+    }
+}
+
+
+/** "P0171" com cada parte destacada. */
+@Composable
+private fun CodeAnatomy() {
+    val parts = listOf("P" to Accent, "0" to Cyan, "1" to Good, "71" to Warn)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+        parts.forEach { (t, c) ->
+            Box(Modifier.padding(horizontal = 3.dp).clip(RoundedCornerShape(10.dp)).background(c.copy(alpha = 0.15f))
+                .padding(horizontal = 12.dp, vertical = 6.dp)) {
+                Text(t, style = Tabular, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = c)
+            }
+        }
+    }
+}
+
+@Composable
+private fun CodePart(part: String, title: String, text: String) {
+    Row(verticalAlignment = Alignment.Top) {
+        Text(part, style = MaterialTheme.typography.titleSmall.merge(Tabular), color = Accent, modifier = Modifier.width(34.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

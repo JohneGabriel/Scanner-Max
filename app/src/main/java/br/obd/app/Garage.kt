@@ -41,6 +41,9 @@ data class VehicleProfile(
     val lastSeen: Long = 0,
     val totalKm: Double = 0.0,
     val lastDiag: String? = null,
+    val model: String? = null,
+    val powerCv: Int? = null,
+    val cylinders: Int? = null,
 ) {
     /** Relação ar/combustível estequiométrica e densidade (kg/L) do que está no tanque. */
     fun afrDensity(measuredEthanolPct: Double? = null): Pair<Double, Double> {
@@ -57,7 +60,7 @@ data class VehicleProfile(
         put("protocol", protocol); put("disp", displacementL); put("dispSet", displacementSet)
         put("fuel", fuel.name); put("eth", ethanolPct); put("price", pricePerL); put("calib", calib)
         put("calibN", calibCount); put("rawFull", rawSinceFull); put("seen", lastSeen); put("km", totalKm)
-        put("diag", lastDiag)
+        put("diag", lastDiag); put("model", model); put("cv", powerCv); put("cyl", cylinders)
     }
 
     companion object {
@@ -70,6 +73,7 @@ data class VehicleProfile(
             ethanolPct = o.optInt("eth", 50), pricePerL = o.optDouble("price", 6.29), calib = o.optDouble("calib", 1.0),
             calibCount = o.optInt("calibN", 0), rawSinceFull = o.optDoubleOrNull("rawFull"),
             lastSeen = o.optLong("seen", 0), totalKm = o.optDouble("km", 0.0), lastDiag = o.optStringOrNull("diag"),
+            model = o.optStringOrNull("model"), powerCv = o.optIntOrNull("cv"), cylinders = o.optIntOrNull("cyl"),
         )
     }
 }
@@ -144,6 +148,42 @@ object Garage {
         _vehicles.value = _vehicles.value.filter { it.id != id }
         if (_current.value?.id == id) _current.value = _vehicles.value.maxByOrNull { it.lastSeen }
         persist()
+    }
+
+    /**
+     * O OBD não informa cilindrada nem potência. Tenta a base pública de chassis da NHTSA
+     * (EUA): ela decodifica bem carros de fábricas que exportam para lá e, para chassis
+     * brasileiros, às vezes só a marca. Só preenche o que veio e o usuário não definiu.
+     */
+    suspend fun lookupVin(): String = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val p = _current.value ?: return@withContext "Nenhum carro selecionado."
+        val vin = p.vin ?: return@withContext "Este carro não informou o chassi (VIN) pela central."
+        val txt = try {
+            val c = java.net.URL("https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/$vin?format=json").openConnection() as java.net.HttpURLConnection
+            c.connectTimeout = 8000; c.readTimeout = 8000
+            c.inputStream.bufferedReader().use { it.readText() }
+        } catch (e: Exception) {
+            return@withContext "Sem conexão com a internet (ou a base não respondeu)."
+        }
+        val r = runCatching { JSONObject(txt).getJSONArray("Results").getJSONObject(0) }.getOrNull()
+            ?: return@withContext "A base não reconheceu este chassi."
+        fun f(k: String) = r.optString(k).trim().takeIf { it.isNotEmpty() && it != "Not Applicable" && it != "0" }
+        val disp = f("DisplacementL")?.toDoubleOrNull()
+        val hp = f("EngineHP")?.toDoubleOrNull()
+        val cyl = f("EngineCylinders")?.toIntOrNull()
+        val model = f("Model")
+        val make = f("Make")
+        val found = listOfNotNull(make, model, disp?.let { "%.1f L".format(it) }, hp?.let { "${(it * 1.0139).toInt()} cv" }, cyl?.let { "$it cil." })
+        if (disp == null && hp == null && model == null) return@withContext "A base só reconheceu ${make ?: "o fabricante"}. Preencha a cilindrada à mão."
+        val updated = p.copy(
+            displacementL = if (!p.displacementSet && disp != null) disp else p.displacementL,
+            displacementSet = p.displacementSet || disp != null,
+            powerCv = p.powerCv ?: hp?.let { (it * 1.0139).toInt() },
+            cylinders = p.cylinders ?: cyl,
+            model = p.model ?: model,
+        )
+        save(updated)
+        "Encontrado: ${found.joinToString(" · ")}"
     }
 
     /** Soma o que uma viagem gastou (estimativa crua) e rodou. */

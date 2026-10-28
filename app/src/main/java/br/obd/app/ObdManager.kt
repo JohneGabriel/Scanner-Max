@@ -135,6 +135,7 @@ object ObdManager {
 
     /** Viagem automática: começa quando o motor liga, termina 45 s depois de desligar. */
     val trip = TripTracker { s, pts ->
+        if (s.vehicleId?.startsWith("SMXDEMO") == true) return@TripTracker
         TripStore.save(s, pts)
         Garage.addTrip(s.km, s.rawLiters)
         log("Viagem salva: %.1f km em %.0f min, %.2f L".format(s.km, s.durationSec / 60, s.liters))
@@ -196,8 +197,12 @@ object ObdManager {
             .any { n.contains(it) }
     }
 
+    /** Carro selecionado antes da demonstração (volta a ser o atual ao sair). */
+    private var beforeDemo: String? = null
+
     fun connect(target: LinkTarget) = scope.launch {
         if (_status.value.startsWith("Conectando")) return@launch
+        if (target.kind == LinkKind.DEMO) beforeDemo = Garage.current.value?.id?.takeIf { !it.startsWith("SMXDEMO") }
         userDisconnected = false
         _vehicle.value = VehicleInfo()
         _values.value = emptyMap()
@@ -233,7 +238,7 @@ object ObdManager {
         _status.value = "Inicializando o adaptador…"
         val version = elm.init()
         _adapter.value = elm.profile
-        prefs.edit().putString("target", target.encode()).apply()
+        if (target.kind != LinkKind.DEMO) prefs.edit().putString("target", target.encode()).apply()
         _adapterName.value = "${target.display} · $version"
         _connected.value = true
         _status.value = "Conectado"
@@ -312,6 +317,16 @@ object ObdManager {
         _connected.value = false
         _status.value = "Desconectado"
         stopService()
+        if (_link.value?.kind == LinkKind.DEMO) {
+            Garage.current.value?.id?.takeIf { it.startsWith("SMXDEMO") }?.let { Garage.delete(it) }
+            beforeDemo?.let { Garage.select(it) }
+            _vehicle.value = VehicleInfo()
+            _values.value = emptyMap()
+            _diag.value = DiagState()
+            loadDiag()
+            _link.value = savedTarget
+            _status.value = "Saiu da demonstração"
+        }
     }
 
     private suspend fun reconnect(): Boolean {
