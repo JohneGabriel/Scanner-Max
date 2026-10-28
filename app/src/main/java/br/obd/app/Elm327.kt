@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.UUID
@@ -25,7 +26,13 @@ class Elm327(private val log: (String) -> Unit) {
     /** Quando false, os comandos não aparecem no log (usado nos benchmarks). */
     var verbose = true
 
-    val isConnected get() = socket?.isConnected == true
+    /** O Android não avisa quando o Bluetooth cai; marcamos false no primeiro erro de E/S. */
+    @Volatile private var alive = false
+    val isConnected get() = alive && socket?.isConnected == true
+
+    /** Último adaptador usado, para reconectar sem perguntar de novo. */
+    var lastDevice: BluetoothDevice? = null
+        private set
 
     @SuppressLint("MissingPermission")
     suspend fun connect(device: BluetoothDevice) = withContext(Dispatchers.IO) {
@@ -40,6 +47,17 @@ class Elm327(private val log: (String) -> Unit) {
         socket = sock
         input = sock.inputStream
         output = sock.outputStream
+        lastDevice = device
+        alive = true
+    }
+
+    /** Executa E/S no socket; se a conexão caiu, fecha tudo e avisa com uma mensagem clara. */
+    private inline fun <T> io(block: () -> T): T = try {
+        block()
+    } catch (e: IOException) {
+        log("Conexão perdida: ${e.message}")
+        close()
+        throw IOException("Conexão com o adaptador perdida", e)
     }
 
     /** Configuração inicial recomendada para leitura rápida e fácil de interpretar. */
@@ -64,7 +82,7 @@ class Elm327(private val log: (String) -> Unit) {
     }
 
     suspend fun send(cmd: String, timeoutMs: Long = 2000): String = lock.withLock {
-        withContext(Dispatchers.IO) {
+        withContext(Dispatchers.IO) { io {
             val inp = input ?: error("Não conectado")
             val out = output ?: error("Não conectado")
             while (inp.available() > 0) inp.read() // descarta lixo pendente
@@ -85,7 +103,7 @@ class Elm327(private val log: (String) -> Unit) {
             val resp = clean(sb.toString())
             if (verbose) log("> $cmd  ←  ${resp.replace("\n", " | ")}")
             resp
-        }
+        } }
     }
 
     /**
@@ -93,7 +111,7 @@ class Elm327(private val log: (String) -> Unit) {
      * até receber qualquer caractere. Escuta por [durationMs] e depois interrompe.
      */
     suspend fun monitor(cmd: String, durationMs: Long): List<String> = lock.withLock {
-        withContext(Dispatchers.IO) {
+        withContext(Dispatchers.IO) { io {
             val inp = input ?: error("Não conectado")
             val out = output ?: error("Não conectado")
             while (inp.available() > 0) inp.read()
@@ -124,7 +142,7 @@ class Elm327(private val log: (String) -> Unit) {
             val lines = clean(sb.toString()).lines().filter { it.isNotBlank() }
             log("> $cmd  ←  ${lines.size} linhas em ${durationMs} ms")
             lines
-        }
+        } }
     }
 
     private fun clean(raw: String) = raw
@@ -134,12 +152,16 @@ class Elm327(private val log: (String) -> Unit) {
         .joinToString("\n")
 
     /** Lê um PID do modo 01 e devolve os bytes de dados (A, B, C...) ou null. */
-    suspend fun readPid(pid: String): IntArray? {
-        val resp = send("01$pid").replace(" ", "")
-        val marker = "41$pid"
-        val line = resp.lines().firstOrNull { it.startsWith(marker) } ?: return null
-        return line.removePrefix(marker).chunked(2)
-            .mapNotNull { it.toIntOrNull(16) }.toIntArray()
+    suspend fun readPid(pid: String, retries: Int = 1): IntArray? {
+        repeat(retries + 1) {
+            val resp = send("01$pid").replace(" ", "")
+            val marker = "41$pid"
+            val line = resp.lines().firstOrNull { it.startsWith(marker) }
+            // na linha K um "NO DATA" de vez em quando é normal: tenta de novo
+            if (line != null) return line.removePrefix(marker).chunked(2)
+                .mapNotNull { it.toIntOrNull(16) }.toIntArray()
+        }
+        return null
     }
 
     suspend fun batteryVoltage(): String = send("ATRV")
@@ -167,6 +189,7 @@ class Elm327(private val log: (String) -> Unit) {
     suspend fun clearDtcs(): String = send("04", timeoutMs = 5000)
 
     fun close() {
+        alive = false
         runCatching { socket?.close() }
         socket = null; input = null; output = null
     }

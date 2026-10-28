@@ -30,6 +30,8 @@ class AdapterProbe(
         if (isCan) {
             step("Escutando o barramento CAN…") { canMonitor() }
             if (!is29bit) step("Procurando módulos por UDS…") { udsScan() }
+        } else {
+            step("Procurando módulos VW pela linha K…") { kwpScan() }
         }
         step("Restaurando configurações…") { restore() }
         progress("Teste concluído")
@@ -37,6 +39,10 @@ class AdapterProbe(
     }
 
     private suspend fun step(msg: String, block: suspend () -> Unit) {
+        if (!elm.isConnected) {
+            line("!! Pulado: adaptador desconectado ($msg)")
+            return
+        }
         progress(msg)
         try {
             block()
@@ -258,10 +264,75 @@ class AdapterProbe(
         elm.send("ATSH7DF")
     }
 
+    /**
+     * Módulos VW na linha K. Cada módulo é "acordado" pelo próprio endereço:
+     *  - init lento (5 baud, protocolo 4): os key bytes dizem qual protocolo o módulo fala
+     *    (01 8A = KWP1281, que o ELM327 não suporta; xx 8F = KWP2000, que ele suporta);
+     *  - init rápido (protocolo 5), só KWP2000.
+     * Depois de acordar, pede só a identificação (1A 9B). Nada é gravado.
+     */
+    private suspend fun kwpScan() {
+        title("Módulos VW pela linha K (KWP2000, só leitura)")
+        line("Cada endereço leva alguns segundos: a linha K exige pausas entre sessões.")
+        val modules = linkedMapOf(
+            "01" to "motor",
+            "03" to "ABS",
+            "09" to "central elétrica",
+            "15" to "airbag",
+            "17" to "painel",
+            "46" to "central de conforto",
+        )
+        for ((addr, name) in modules) {
+            progress("Linha K: módulo $addr ($name)…")
+            line("\n[$addr] $name")
+            for ((proto, label) in listOf("4" to "init lento", "5" to "init rápido")) {
+                closeSession()
+                elm.send("ATSP$proto")
+                if (proto == "4") elm.send("ATIIA$addr")
+                elm.send("ATSH81${addr}F1")
+                val resp = elm.send("1A9B", timeoutMs = 8000)
+                val kw = elm.send("ATKW")
+                val result = when {
+                    resp.replace(" ", "").contains("5A9B") ->
+                        "RESPONDE em KWP2000 — identificação: ${ascii(resp, "5A9B", count = false)}"
+                    resp.replace(" ", "").startsWith("7F1A") ->
+                        "responde em KWP2000, mas recusou a identificação (${resp.take(10)})"
+                    Elm327.isError(resp) -> "sem comunicação (${resp.lines().firstOrNull()})"
+                    else -> "resposta inesperada: ${resp.lines().firstOrNull()}"
+                }
+                line("  $label: $result")
+                if (!Elm327.isError(kw)) line("  key bytes: $kw ${keyBytesInfo(kw)}")
+                if (result.startsWith("RESPONDE")) break // não precisa testar o outro init
+            }
+        }
+        closeSession()
+        // volta ao protocolo do OBD genérico
+        elm.send("ATD")
+        elm.send("ATSP0")
+    }
+
+    private suspend fun closeSession() {
+        elm.send("ATPC")
+        // a ECU só aceita um novo init depois que a sessão anterior expira (P3 máx. = 5 s)
+        kotlinx.coroutines.delay(5500)
+    }
+
+    private fun keyBytesInfo(kw: String): String {
+        val k = kw.replace(" ", "").uppercase()
+        return when {
+            k.contains("018A") -> "(KWP1281 — protocolo VW que o ELM327 não fala)"
+            k.endsWith("8F") -> "(KWP2000)"
+            k.contains("0808") || k.contains("9494") -> "(ISO 9141 / OBD genérico)"
+            else -> ""
+        }
+    }
+
     private suspend fun restore() {
         elm.verbose = true
+        if (!elm.isConnected) return
         for (c in listOf("ATE0", "ATL0", "ATS0", "ATH0", "ATAT1")) elm.send(c)
         if (isCan && !is29bit) elm.send("ATSH7DF")
+        if (!isCan) elm.send("0100", timeoutMs = 8000) // reabre a sessão do OBD genérico
     }
 
     companion object {

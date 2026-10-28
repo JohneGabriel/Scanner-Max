@@ -121,20 +121,34 @@ class MainActivity : ComponentActivity() {
         AlertDialog.Builder(this)
             .setTitle("Escolha o adaptador")
             .setItems(devices.map { "${it.name ?: "?"}\n${it.address}" }.toTypedArray()) { _, i ->
-                lifecycleScope.launch {
-                    try {
-                        status.text = "Conectando…"
-                        elm.close()
-                        elm.connect(devices[i])
-                        status.text = "Inicializando…"
-                        val version = elm.init()
-                        status.text = "Conectado: $version"
-                    } catch (e: Exception) {
-                        status.text = "Falha: ${e.message}"
-                    }
-                }
+                lifecycleScope.launch { connectTo(devices[i]) }
             }
             .show()
+    }
+
+    private suspend fun connectTo(device: android.bluetooth.BluetoothDevice): Boolean = try {
+        status.text = "Conectando…"
+        elm.close()
+        elm.connect(device)
+        status.text = "Inicializando…"
+        val version = elm.init()
+        status.text = "Conectado: ${version.lines().last()}"
+        true
+    } catch (e: Exception) {
+        status.text = "Falha: ${e.message}"
+        false
+    }
+
+    /** Tenta voltar a falar com o último adaptador (até 3 vezes). */
+    private suspend fun reconnect(): Boolean {
+        val device = elm.lastDevice ?: return false
+        for (attempt in 1..3) {
+            status.text = "Conexão caiu — reconectando ($attempt/3)…"
+            if (connectTo(device)) return true
+            delay(2000)
+        }
+        status.text = "Não foi possível reconectar. Toque em Conectar."
+        return false
     }
 
     private fun toggleLive() {
@@ -145,19 +159,33 @@ class MainActivity : ComponentActivity() {
         if (busyJob?.isActive == true) { status.text = "Espere o teste terminar"; return }
         liveJob = lifecycleScope.launch {
             status.text = "Lendo ao vivo…"
+            var tick = 0
+            var t0 = System.currentTimeMillis()
+            var rpmReads = 0
+            // A linha K faz uns 3,5 pedidos/s: gastamos a maior parte com o que muda rápido.
             while (isActive) {
                 try {
-                    elm.readPid("0C")?.takeIf { it.size >= 2 }?.let { set("RPM", "${(it[0] * 256 + it[1]) / 4} rpm") }
-                    elm.readPid("0D")?.let { set("Velocidade", "${it[0]} km/h") }
-                    elm.readPid("05")?.let { set("Temp. motor", "${it[0] - 40} °C") }
-                    elm.readPid("04")?.let { set("Carga", "${it[0] * 100 / 255} %") }
-                    elm.readPid("11")?.let { set("Acelerador", "${it[0] * 100 / 255} %") }
-                    elm.readPid("0F")?.let { set("Temp. admissão", "${it[0] - 40} °C") }
-                    set("Bateria", elm.batteryVoltage())
+                    elm.readPid("0C")?.takeIf { it.size >= 2 }?.let {
+                        set("RPM", "${(it[0] * 256 + it[1]) / 4} rpm"); rpmReads++
+                    }
+                    if (tick % 2 == 0) elm.readPid("0D")?.let { set("Velocidade", "${it[0]} km/h") }
+                    if (tick % 2 == 1) elm.readPid("11")?.let { set("Acelerador", "${it[0] * 100 / 255} %") }
+                    if (tick % 4 == 1) elm.readPid("04")?.let { set("Carga", "${it[0] * 100 / 255} %") }
+                    when (tick % 10) {
+                        3 -> elm.readPid("05")?.let { set("Temp. motor", "${it[0] - 40} °C") }
+                        6 -> elm.readPid("0F")?.let { set("Temp. admissão", "${it[0] - 40} °C") }
+                        9 -> set("Bateria", elm.batteryVoltage())
+                    }
+                    tick++
+                    val now = System.currentTimeMillis()
+                    if (now - t0 >= 3000) {
+                        status.text = "Lendo ao vivo — RPM %.1f×/s".format(rpmReads * 1000.0 / (now - t0))
+                        t0 = now; rpmReads = 0
+                    }
                 } catch (e: Exception) {
+                    if (!elm.isConnected && reconnect()) continue
                     status.text = "Erro: ${e.message}"; break
                 }
-                delay(200)
             }
         }
     }
@@ -215,6 +243,7 @@ class MainActivity : ComponentActivity() {
         if (busyJob?.isActive == true) { status.text = "Já tem um teste rodando"; return }
         liveJob?.cancel()
         busyJob = lifecycleScope.launch {
+            appendLog("Teste: a parte da linha K leva uns 2 minutos — deixe o app aberto")
             val report = AdapterProbe(elm) { msg -> runOnUiThread { status.text = msg } }.run()
             lastReport = report
             report.lines().forEach { appendLog(it) }
