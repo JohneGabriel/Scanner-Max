@@ -96,6 +96,22 @@ object Licensing {
         auto()
     }
 
+    /**
+     * Recebe a licença vinda do link pessoal (botão "Ativar no app" ou área de transferência).
+     * Devolve true se era uma licença válida e nova.
+     */
+    fun install(text: String?): Boolean {
+        if (!::ctx.isInitialized) return false
+        val l = License.parse(text?.let { Regex("SMX1\\.[0-9a-f.A-Za-z_-]+").find(it)?.value })?.takeIf { it.valid() } ?: return false
+        if (license?.id == l.id) return false
+        sp.edit().putString("lic", l.encode()).remove("receipt").remove("pendingSince").remove("released").apply()
+        license = l
+        ObdManager.log("Licença recebida pelo link")
+        refresh()
+        activate()
+        return true
+    }
+
     /** Relógio que nunca volta: atrasar o relógio do aparelho não estende o prazo. */
     private fun now(): Long {
         val t = System.currentTimeMillis()

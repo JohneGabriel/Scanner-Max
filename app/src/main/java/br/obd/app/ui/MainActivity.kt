@@ -124,6 +124,7 @@ class MainActivity : ComponentActivity() {
         ObdManager.init(this)
         ThemeState.apply(Settings.prefs.value.theme)
         PendingGo.value = intent?.getStringExtra("go")
+        takeLicense(intent)
         br.obd.app.ReminderWorker.opened(this)
         setContent {
             val prefs by Settings.prefs.collectAsState()
@@ -148,7 +149,28 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         intent.getStringExtra("go")?.let { PendingGo.value = it }
+        takeLicense(intent)
     }
+
+    /** scannermax://ativar?l=SMX1... (botão "Ativar no app" da página de instalação). */
+    private fun takeLicense(i: Intent?) {
+        val data = i?.data ?: return
+        if (data.scheme == "scannermax" && br.obd.app.Licensing.install(data.getQueryParameter("l"))) PendingGo.value = "license"
+    }
+
+    /** O link pessoal copia a licença ao baixar: ao abrir pela primeira vez, o app a encontra sozinho. */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus || clipChecked || !br.obd.app.Licensing.enforced || br.obd.app.Licensing.license != null) return
+        clipChecked = true
+        val cm = getSystemService(android.content.ClipboardManager::class.java) ?: return
+        val text = runCatching { cm.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString() }.getOrNull() ?: return
+        if (text.contains("SMX1.") && br.obd.app.Licensing.install(text)) {
+            runCatching { if (android.os.Build.VERSION.SDK_INT >= 28) cm.clearPrimaryClip() }
+            PendingGo.value = "license"
+        }
+    }
+    private var clipChecked = false
 
     override fun onStart() { super.onStart(); ObdManager.setVisible(true) }
     override fun onStop() { ObdManager.setVisible(false); super.onStop() }
@@ -284,6 +306,7 @@ private fun AppRoot() {
             "hud" -> nav.go("hud")
             "maint" -> nav.go("maint")
             "vehicle" -> nav.go("vehicle")
+            "license" -> nav.go("license")
             "demo" -> if (!connected) ObdManager.connect(br.obd.app.link.LinkTarget.DEMO)
         }
     }

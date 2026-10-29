@@ -184,7 +184,7 @@ private fun look(v: LicView, phase: ActPhase): Look {
         LicStatus.INVALID -> Look(Bad, Icons.Filled.ErrorOutline, "Licença inválida",
             "Este arquivo de instalação foi modificado. Instale de novo pelo link que você recebeu na compra.")
         LicStatus.NONE -> Look(Cyan, null, "Versão de demonstração",
-            "Esta cópia não tem licença: dá para explorar tudo com um carro simulado. Já comprou? Instale pelo link pessoal que você recebeu; a ativação é automática.")
+            "Esta cópia não tem licença: dá para explorar tudo com um carro simulado. Já comprou? Abra o link pessoal que você recebeu e toque em "Ativar no app".")
     }
 }
 
@@ -325,6 +325,8 @@ private fun ActStep(text: String, s: StepState) {
 private fun LicenseActions(v: LicView, phase: ActPhase, page: Boolean, app: AppActions, onClose: () -> Unit) {
     val running = phase == ActPhase.SENDING || phase == ActPhase.WAITING
     var confirmRelease by remember { mutableStateOf(false) }
+    var boughtHelp by remember { mutableStateOf(false) }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     val demo = { onClose(); if (!ObdManager.connected.value) ObdManager.connect(LinkTarget.DEMO) }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         @Composable fun Primary(t: String, enabled: Boolean = true, a: () -> Unit) =
@@ -356,7 +358,16 @@ private fun LicenseActions(v: LicView, phase: ActPhase, page: Boolean, app: AppA
             LicStatus.BLOCKED, LicStatus.INVALID -> Secondary("Usar a demonstração", demo)
             LicStatus.NONE -> {
                 Primary("Explorar a demonstração", a = demo)
-                Secondary("Conhecer o Scanner Max") { app.openUrl(Repos.SITE_URL) }
+                Secondary("Já comprei") {
+                    val cm = ctx.getSystemService(android.content.ClipboardManager::class.java)
+                    val text = runCatching { cm?.primaryClip?.getItemAt(0)?.coerceToText(ctx)?.toString() }.getOrNull()
+                    if (!Licensing.install(text)) boughtHelp = true
+                }
+                TextButton(onClick = { app.openUrl(Repos.SITE_URL) }, Modifier.fillMaxWidth()) { BtnLabel("Conhecer o Scanner Max") }
+                AnimatedVisibility(boughtHelp) {
+                    Callout("Abra o link pessoal que você recebeu na mensagem da compra e toque em \"Ativar no app\". " +
+                        "Se preferir, copie o link inteiro e toque em Já comprei de novo.", Tone.INFO, title = "Falta a sua licença")
+                }
             }
         }
         if (!page && v.status != LicStatus.ACTIVE && v.status != LicStatus.OFF && !running && v.status != LicStatus.PENDING)
