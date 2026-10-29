@@ -34,6 +34,10 @@ class UsbKLinePort private constructor(private val port: UsbSerialPort) : KLineP
         port.write(byteArrayOf(b.toByte()), 200)
     }
 
+    override fun writeAll(bytes: IntArray) {
+        port.write(ByteArray(bytes.size) { bytes[it].toByte() }, 500)
+    }
+
     override fun read(timeoutMs: Int): Int {
         if (pos < len) return buf[pos++].toInt() and 0xFF
         val deadline = System.currentTimeMillis() + timeoutMs
@@ -75,6 +79,9 @@ class UsbKLinePort private constructor(private val port: UsbSerialPort) : KLineP
             append(" · ")
             append(if (d.vendorId == 0x0403) "FTDI" else if (d.vendorId == 0x1A86) "CH340" else "VID %04X".format(d.vendorId))
         }
+
+        /** Usa uma porta já aberta (o USB do ELM327 que descobriu ser um cabo KKL). */
+        fun wrap(p: UsbSerialPort): UsbKLinePort = UsbKLinePort(p)
 
         /** Pede permissão ao usuário (se preciso) e abre a porta. */
         suspend fun open(ctx: Context, driver: UsbSerialDriver): UsbKLinePort {

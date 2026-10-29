@@ -104,10 +104,9 @@ object Legal {
 
     val PRIVACY = "Política de privacidade" to listOf(
         "Resumo" to "Tudo fica no seu aparelho. O Scanner Max não tem servidor, não cria conta, não usa publicidade e não envia seus dados para ninguém.",
-        "Atualizações" to "O app consulta periodicamente o site do Scanner Max para saber se há versão nova. Essa consulta não envia nenhum dado seu.",
         "O que fica salvo no aparelho" to "Perfis dos veículos (nome, chassi lido da central, cilindrada, combustível, preço), viagens (distância, tempo, consumo estimado e gráficos), resultados de testes, último diagnóstico, lembretes de manutenção, preferências e o log técnico da sessão.",
         "Localização" to "O app não usa GPS. Em Android 11 ou anterior, o sistema exige a permissão de localização para procurar adaptadores Bluetooth LE; ela é usada só para essa busca.",
-        "Permissões" to "Instalar apps: baixar e instalar as atualizações do Scanner Max (o Android sempre pede sua confirmação). Bluetooth: conectar ao adaptador. Dispositivos próximos/Localização: encontrar adaptadores BLE. Notificações: mostrar a conexão e os alertas do carro. USB: usar adaptadores e cabos ligados pelo OTG. Rede: conectar a adaptadores Wi-Fi na rede local deles.",
+        "Permissões" to "Bluetooth: conectar ao adaptador. Dispositivos próximos/Localização: encontrar adaptadores BLE. Notificações: mostrar a conexão e os alertas do carro. USB: usar adaptadores e cabos ligados pelo OTG. Rede: conectar a adaptadores Wi-Fi na rede local deles.",
         "Quando algo sai do aparelho" to "Só quando você escolhe: ao compartilhar um relatório, CSV ou log, ao abrir uma pesquisa de código no navegador, ao buscar os dados do motor pelo chassi (o número do chassi vai para a base pública da NHTSA) ou ao abrir um relato de problema/sugestão no GitHub. Nesses casos vale a política do serviço que você escolheu.",
         "Apagar seus dados" to "Você pode apagar viagens e testes no próprio app. Para apagar tudo, use Configurações do Android → Apps → Scanner Max → Armazenamento → Limpar dados, ou desinstale o app.",
     )

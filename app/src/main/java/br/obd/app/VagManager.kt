@@ -67,6 +67,12 @@ object VagManager {
         if (_busy.value != null) return@launch
         _busy.value = "Conectando ao endereço %02X…".format(address)
         try {
+            // o cabo só pode ser usado por um de cada vez: libera a conexão OBD2 pelo USB, se houver
+            if (ObdManager.link.value?.kind == br.obd.app.link.LinkKind.USB && ObdManager.connected.value) {
+                log("Liberando o cabo da conexão OBD2…")
+                ObdManager.disconnect()
+                kotlinx.coroutines.delay(800)
+            }
             disconnectNow()
             val driver = UsbKLinePort.findDrivers(ObdManager.context).firstOrNull()
                 ?: throw IllegalStateException("Nenhum cabo USB encontrado. Plugue o cabo KKL pelo OTG.")

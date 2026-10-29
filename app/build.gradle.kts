@@ -12,8 +12,8 @@ android {
         applicationId = "br.obd.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 26
-        versionName = "1.8"
+        versionCode = 27
+        versionName = "1.7.1"
     }
 
     signingConfigs {
@@ -25,14 +25,6 @@ android {
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
-        // chave definitiva (só existe no CI, vinda dos segredos do GitHub)
-        val ks = System.getenv("SMX_KEYSTORE")
-        if (!ks.isNullOrBlank() && file(ks).exists()) create("release") {
-            storeFile = file(ks)
-            storePassword = System.getenv("SMX_KEYSTORE_PASS")
-            keyAlias = "scannermax"
-            keyPassword = System.getenv("SMX_KEYSTORE_PASS")
-        }
     }
 
     buildTypes {
@@ -41,14 +33,13 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // chave definitiva quando disponível; senão a de testes (builds locais)
-            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+            // mesma chave do debug: instala por cima das versões anteriores
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
     buildFeatures {
         compose = true
-        buildConfig = true
     }
 
     compileOptions {

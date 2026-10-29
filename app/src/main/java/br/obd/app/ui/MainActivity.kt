@@ -32,7 +32,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -64,8 +63,6 @@ import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Usb
-import androidx.compose.material.icons.filled.VerifiedUser
-import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -150,9 +147,8 @@ class MainActivity : ComponentActivity() {
         intent.getStringExtra("go")?.let { PendingGo.value = it }
     }
 
-
-    override fun onStart() { super.onStart(); ObdManager.setVisible(true); br.obd.app.Updater.foreground = true }
-    override fun onStop() { ObdManager.setVisible(false); br.obd.app.Updater.foreground = false; super.onStop() }
+    override fun onStart() { super.onStart(); ObdManager.setVisible(true) }
+    override fun onStop() { ObdManager.setVisible(false); super.onStop() }
 }
 
 /** Tela pedida por um atalho do ícone ou por uma notificação. */
@@ -206,7 +202,6 @@ private fun pageTitle(n: Nav): String = when (n.route) {
     "hud" -> "Modo HUD"
     "graphs" -> "Gráficos ao vivo"
     "custom" -> "Sensores personalizados"
-    "updates" -> "Atualizações"
     else -> ""
 }
 
@@ -285,22 +280,10 @@ private fun AppRoot() {
             "hud" -> nav.go("hud")
             "maint" -> nav.go("maint")
             "vehicle" -> nav.go("vehicle")
-            "updates" -> nav.go("updates")
             "demo" -> if (!connected) ObdManager.connect(br.obd.app.link.LinkTarget.DEMO)
         }
     }
     LaunchedEffect(prefs.quickNotif) { br.obd.app.QuickNotif.refresh(context) }
-
-    // procura versão nova (no máximo a cada 12 h)
-    LaunchedEffect(splash) { if (!splash) br.obd.app.Updater.check() }
-    // versão nova já baixada: instala ao abrir, antes de conectar (o app reabre sozinho na versão nova)
-    val upd by br.obd.app.Updater.state.collectAsState()
-    var autoInstalled by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(upd, splash) {
-        if (splash || autoInstalled || upd !is br.obd.app.UpdState.Ready) return@LaunchedEffect
-        delay(600)
-        if (br.obd.app.Updater.safeNow() && br.obd.app.Updater.canInstall()) { autoInstalled = true; br.obd.app.Updater.install() }
-    }
 
     // um teste começou em outra tela: abre a tela dele
     val live by TestRunner.live.collectAsState()
@@ -420,7 +403,6 @@ private fun AppRoot() {
             }
         }
 
-        if (nav.stack.isEmpty()) UpdateBanner(Modifier.align(Alignment.BottomCenter).padding(bottom = 96.dp).navigationBarsPadding())
         AnimatedVisibility(!splash && !prefs.onboarded, enter = fadeIn(tween(400)), exit = fadeOut(tween(350))) {
             SetupScreen { connect -> if (connect) nav.go("connect") }
         }
@@ -463,7 +445,6 @@ private fun Page(p: Nav, app: AppActions) {
         "hud" -> HudScreen()
         "graphs" -> GraphsScreen(app)
         "custom" -> CustomPidsScreen()
-        "updates" -> UpdatesScreen()
     }
 }
 
@@ -506,7 +487,6 @@ private fun DrawerContent(app: AppActions, go: (String) -> Unit) {
         MenuRow(Icons.Filled.Terminal, "Terminal", "Comandos AT e OBD") { go("terminal") }
 
         DrawerGroup("App")
-        MenuRow(Icons.Filled.SystemUpdate, "Atualizações", "Versão ${AppInfo.version}") { go("updates") }
         MenuRow(Icons.Filled.Palette, "Personalizar", "Temas, painel, alertas, sons") { go("customize") }
         MenuRow(Icons.Filled.Timeline, "Log e exportação", "Para enviar quando algo der errado") { go("log") }
         MenuRow(Icons.Filled.BugReport, "Reportar problema", "Abre um relato no GitHub", Bad) { Support.bug(app) }

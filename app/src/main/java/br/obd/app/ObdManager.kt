@@ -234,6 +234,8 @@ object ObdManager {
         _values.value = emptyMap()
         Alerts.reset()
         EngineHealth.reset()
+        // o cabo KKL pode estar com a central do fabricante: libera antes
+        if (target.kind == LinkKind.USB && VagManager.session.value != null) { VagManager.disconnect().join(); kotlinx.coroutines.delay(500) }
         if (target.kind == LinkKind.USB && !UsbElmTransport.ensurePermission(context)) {
             _status.value = "Permissão USB negada ou adaptador não encontrado"
             return@launch

@@ -13,8 +13,6 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.VIBRATE" />
-    <!-- atualização pelo próprio app (sem loja) -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- serviço que mantém a conexão viva fora do app -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -48,12 +46,6 @@
         </activity>
 
         <receiver android:name=".NotifReceiver" android:exported="false" />
-        <receiver android:name=".InstallReceiver" android:exported="false" />
-        <receiver android:name=".UpdatedReceiver" android:exported="false">
-            <intent-filter>
-                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
-            </intent-filter>
-        </receiver>
 
         <service
             android:name=".ObdService"

@@ -154,7 +154,7 @@ fun ConnectScreen(app: AppActions) {
         var usb by remember { mutableStateOf<String?>(null) }
         LaunchedEffect(Unit) { while (true) { usb = UsbKLinePort.findDrivers(ctx).firstOrNull()?.let { UsbKLinePort.describe(it.device) }; delay(1500) } }
         Section("USB (OTG)", icon = Icons.Filled.Usb, trailing = { StatusPill(if (usb != null) "detectado" else "nada plugado", if (usb != null) Good else MaterialTheme.colorScheme.onSurfaceVariant) }) {
-            Hint("ELM327 com cabo USB (FTDI, CH340, CP210x, PL2303). Cabos KKL da VW não são ELM327: use Menu → Central do fabricante.")
+            Hint("ELM327 USB ou cabo KKL (FTDI, CH340, CP210x, PL2303). Com o cabo KKL o próprio app fala OBD2 na linha K (ISO 9141-2 e KWP2000): painel, códigos e testes funcionam igual. A primeira conexão leva uns 5 s.")
             usb?.let { KeyValue("Dispositivo", it) }
             FilledTonalButton(onClick = { go(LinkTarget(LinkKind.USB, "usb", usb ?: "USB")) }, enabled = usb != null && !connecting) { BtnLabel("Conectar pelo USB") }
         }

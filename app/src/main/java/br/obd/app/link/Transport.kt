@@ -191,6 +191,13 @@ class UsbElmTransport(private val ctx: Context, private val log: (String) -> Uni
     override val kind = LinkKind.USB
     private var port: UsbSerialPort? = null
     private var reader: Thread? = null
+    /** Cabo KKL: o próprio app fala OBD2 na linha K (ELM327 "virtual"). */
+    private var kkl: KLineElm? = null
+    private var keeper: Thread? = null
+    private val pending = StringBuilder()
+
+    /** true quando o USB é um cabo KKL (sem chip ELM). */
+    val isKkl get() = kkl != null
 
     override fun open() {
         val driver = UsbKLinePort.findDrivers(ctx).firstOrNull()
@@ -219,13 +226,20 @@ class UsbElmTransport(private val ctx: Context, private val log: (String) -> Uni
                 if (got.contains('>')) break
             }
             if (got.contains("ELM") || got.contains("STN") || got.contains("OBD")) {
-                log("USB: adaptador respondeu a $baud baud")
+                log("USB: adaptador ELM327 respondeu a $baud baud")
                 startReader(p)
                 return
             }
         }
-        close()
-        throw IOException("O dispositivo USB não respondeu como ELM327. Se for o cabo KKL (VW), use a central do fabricante.")
+        // não é ELM327: cabo KKL (só devolve o eco do que enviamos). O app fala OBD2 direto na linha K.
+        log("USB: sem chip ELM327; usando como cabo KKL (linha K direta)")
+        val k = KLineElm(UsbKLinePort.wrap(p), log)
+        kkl = k
+        keeper = Thread({
+            while (opened) {
+                try { Thread.sleep(500); k.keepAlive() } catch (e: InterruptedException) { break } catch (e: Exception) { opened = false }
+            }
+        }, "kkl-keepalive").apply { isDaemon = true; start() }
     }
 
     private fun startReader(p: UsbSerialPort) {
@@ -239,12 +253,27 @@ class UsbElmTransport(private val ctx: Context, private val log: (String) -> Uni
     }
 
     override fun write(data: ByteArray) {
+        val k = kkl
+        if (k != null) {
+            if (!opened) throw IOException("Cabo USB desconectado")
+            for (b in data) {
+                val c = (b.toInt() and 0xFF).toChar()
+                if (c != '\r') { pending.append(c); continue }
+                val cmd = pending.toString(); pending.clear()
+                val r = try { k.handle(cmd) } catch (e: Exception) { opened = false; throw IOException("Cabo KKL: ${e.message}") }
+                push(r.toByteArray(Charsets.ISO_8859_1))
+            }
+            return
+        }
         val p = port ?: throw IOException("USB fechado")
         try { p.write(data, 1000) } catch (e: Exception) { opened = false; throw IOException("USB: ${e.message}") }
     }
 
     override fun close() {
         opened = false
+        keeper?.interrupt()
+        runCatching { kkl?.close() }
+        kkl = null
         runCatching { port?.close() }
         port = null
     }

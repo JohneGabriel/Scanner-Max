@@ -19,6 +19,8 @@ interface KLinePort {
     /** true = linha em nível baixo (break); false = repouso (alto). */
     fun setBreak(on: Boolean)
     fun write(b: Int)
+    /** Envia vários bytes de uma vez, sem pausa entre eles (o KWP2000 aceita; P4 mínimo = 0). */
+    fun writeAll(bytes: IntArray) { for (b in bytes) write(b) }
     /** Lê um byte, ou -1 se o tempo acabar. */
     fun read(timeoutMs: Int): Int
     fun purge()
@@ -277,7 +279,10 @@ class VagSession(
         val msg = intArrayOf(0x80 or data.size, target, 0xF1) + data
         val frame = msg + (msg.sum() and 0xFF)
         if (trace) log("TX ${frame.joinToString(" ") { hex(it) }}")
-        for (b in frame) { writeEcho(b); Thread.sleep(5) } // P4: 5–20 ms entre bytes
+        // a mensagem vai inteira de uma vez: esperar o eco de cada byte antes do próximo passa dos
+        // 20 ms entre bytes (P4 máximo) em cabos CH340, e a central descarta a mensagem
+        port.writeAll(frame)
+        consumeEcho(frame)
         repeat(10) {
             val r = kwpReceive()
             lastMsg = System.currentTimeMillis()
@@ -308,6 +313,14 @@ class VagSession(
     }
 
     // ================================================================== utilidades
+
+    /** Descarta o eco de uma mensagem enviada de uma vez (conferindo que saiu inteira). */
+    private fun consumeEcho(frame: IntArray) {
+        for (b in frame) {
+            val e = port.read(100)
+            if (e != b) throw KLineException("eco do cabo esperado ${hex(b)}, veio ${hex(e)}")
+        }
+    }
 
     private fun writeEcho(b: Int) {
         port.write(b)
