@@ -73,7 +73,10 @@ fun ConnectScreen(app: AppActions) {
     // conectou: volta para o painel
     LaunchedEffect(connected) { if (connected) { delay(400); app.nav.home(0) } }
 
-    fun go(t: LinkTarget) = ObdManager.connect(t)
+    fun go(t: LinkTarget) {
+        if (t.kind == LinkKind.BT_CLASSIC || t.kind == LinkKind.BLE) app.ensureBt(true) { ObdManager.connect(t) }
+        else ObdManager.connect(t)
+    }
     val connecting = status.startsWith("Conectando") || status.startsWith("Inicializando")
 
     Column(
@@ -112,7 +115,10 @@ fun ConnectScreen(app: AppActions) {
         val bonded = remember(granted, refresh) { if (granted) ObdManager.bondedDevices() else emptyList() }
         var showAll by remember { mutableStateOf(false) }
         Section("Bluetooth pareados", icon = Icons.Filled.Bluetooth) {
-            if (!ObdManager.bluetoothOn()) Callout("O Bluetooth está desligado. Ligue nas configurações rápidas.", Tone.WARN)
+            if (!ObdManager.bluetoothOn()) {
+                Callout("O Bluetooth está desligado.", Tone.WARN)
+                Button(onClick = { app.ensureBt(true) { refresh++ } }) { BtnLabel("Ativar Bluetooth") }
+            }
             val obd = bonded.filter { ObdManager.looksLikeObd(it.name) }
             val others = bonded - obd.toSet()
             if (bonded.isEmpty()) Hint("Nenhum aparelho pareado. Pareie o adaptador nas configurações de Bluetooth do celular (PIN 1234 ou 0000) — adaptadores BLE não precisam: use a busca abaixo.")

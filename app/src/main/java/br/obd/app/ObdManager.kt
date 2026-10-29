@@ -211,6 +211,9 @@ object ObdManager {
             .sortedByDescending { looksLikeObd(it.name) }
     }
 
+    /** Mensagem para a barra de status (vinda da tela). */
+    fun notifyStatus(msg: String) { if (!_connected.value) _status.value = msg }
+
     fun bluetoothOn(): Boolean = context.getSystemService(BluetoothManager::class.java)?.adapter?.isEnabled == true
 
     fun looksLikeObd(name: String?): Boolean {

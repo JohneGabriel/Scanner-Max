@@ -234,7 +234,29 @@ private fun AppRoot() {
     val openUrl: (String) -> Unit = { url ->
         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
     }
-    val app = AppActions(nav, onShare, openUrl, onConnect = { nav.go("connect") })
+    // Bluetooth desligado: pede ao Android para ligar (o próprio sistema mostra o diálogo de consentimento)
+    var btPending by remember { mutableStateOf<Pair<Boolean, () -> Unit>?>(null) }
+    val btLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) {
+        val p = btPending; btPending = null
+        if (p != null) {
+            if (ObdManager.bluetoothOn()) { br.obd.app.Feedback.success(); p.second() }
+            else if (!p.first) p.second()
+            else ObdManager.notifyStatus("O Bluetooth continua desligado. Ligue para conectar ao adaptador.")
+        }
+    }
+    /** Garante o Bluetooth ligado antes de [action]. [required] = sem Bluetooth não adianta seguir. */
+    val ensureBt: (Boolean, () -> Unit) -> Unit = { required, action ->
+        val hasAdapter = context.getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter != null
+        if (!hasAdapter || ObdManager.bluetoothOn() || !Permissions.hasBluetooth(context)) action()
+        else {
+            btPending = required to action
+            runCatching { btLauncher.launch(Intent(android.bluetooth.BluetoothAdapter.ACTION_REQUEST_ENABLE)) }
+                .onFailure { btPending = null; action() }
+        }
+    }
+    val app = AppActions(nav, onShare, openUrl, onConnect = { ensureBt(false) { nav.go("connect") } }, ensureBt = ensureBt)
 
     // reconecta sozinho ao último adaptador ao abrir (se o usuário quiser)
     LaunchedEffect(Unit) {
@@ -251,7 +273,7 @@ private fun AppRoot() {
         if (go == null || splash || !prefs.onboarded) return@LaunchedEffect
         PendingGo.value = null
         when (go) {
-            "connect" -> if (connected) nav.home(0) else nav.go("connect")
+            "connect" -> if (connected) nav.home(0) else app.onConnect()
             "codes" -> { nav.home(3); if (connected) ObdManager.readDiagnostics() }
             "tests" -> nav.home(2)
             "trips" -> nav.home(1)
@@ -394,6 +416,7 @@ class AppActions(
     val share: (File, String) -> Unit,
     val openUrl: (String) -> Unit,
     val onConnect: () -> Unit,
+    val ensureBt: (Boolean, () -> Unit) -> Unit = { _, a -> a() },
 )
 
 @Composable
