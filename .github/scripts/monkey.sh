@@ -6,16 +6,17 @@ adb install -r -g obd-elm327.apk
 adb logcat -c
 for seed in 1234 98765 4242; do
   adb shell monkey -p br.obd.app --pct-syskeys 0 --pct-appswitch 3 --pct-anyevent 0 \
-    --throttle 80 -s $seed -v 2500 >> monkey.txt 2>&1 || true
+    --throttle 80 -s $seed -v -v 2500 >> monkey.txt 2>&1 || true
 done
 # rotação e reabertura (configChanges)
 adb shell settings put system accelerometer_rotation 0
 adb shell settings put system user_rotation 1
-adb shell monkey -p br.obd.app --pct-syskeys 0 --throttle 80 -s 777 -v 1000 >> monkey.txt 2>&1 || true
+adb shell monkey -p br.obd.app --pct-syskeys 0 --throttle 80 -s 777 -v -v 1000 >> monkey.txt 2>&1 || true
 adb shell settings put system user_rotation 0
 adb logcat -d > logcat.txt
 set +x
-events=$(grep -c ":Sending" monkey.txt)
+events=$(grep -o "Events injected: [0-9]*" monkey.txt | awk '{s+=$3} END {print s+0}')
+grep -E "Events injected|aborted|Monkey finished|// (CRASH|NOT RESPONDING)" monkey.txt | head -20 | while IFS= read -r l; do echo "::notice::$l"; done
 crash=0
 if grep -q "FATAL EXCEPTION" logcat.txt && grep -A3 "FATAL EXCEPTION" logcat.txt | grep -q "br.obd.app"; then crash=1; fi
 if grep -q "CRASH: br.obd.app\|ANR in br.obd.app\|NOT RESPONDING: br.obd.app" monkey.txt logcat.txt; then crash=1; fi
