@@ -124,7 +124,6 @@ class MainActivity : ComponentActivity() {
         ObdManager.init(this)
         ThemeState.apply(Settings.prefs.value.theme)
         PendingGo.value = intent?.getStringExtra("go")
-        takeLicense(intent)
         br.obd.app.ReminderWorker.opened(this)
         setContent {
             val prefs by Settings.prefs.collectAsState()
@@ -149,28 +148,8 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         intent.getStringExtra("go")?.let { PendingGo.value = it }
-        takeLicense(intent)
     }
 
-    /** scannermax://ativar?l=SMX1... (botão "Ativar no app" da página de instalação). */
-    private fun takeLicense(i: Intent?) {
-        val data = i?.data ?: return
-        if (data.scheme == "scannermax" && br.obd.app.Licensing.install(data.getQueryParameter("l"))) PendingGo.value = "license"
-    }
-
-    /** O link pessoal copia a licença ao baixar: ao abrir pela primeira vez, o app a encontra sozinho. */
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (!hasFocus || clipChecked || !br.obd.app.Licensing.enforced || br.obd.app.Licensing.license != null) return
-        clipChecked = true
-        val cm = getSystemService(android.content.ClipboardManager::class.java) ?: return
-        val text = runCatching { cm.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString() }.getOrNull() ?: return
-        if (text.contains("SMX1.") && br.obd.app.Licensing.install(text)) {
-            runCatching { if (android.os.Build.VERSION.SDK_INT >= 28) cm.clearPrimaryClip() }
-            PendingGo.value = "license"
-        }
-    }
-    private var clipChecked = false
 
     override fun onStart() { super.onStart(); ObdManager.setVisible(true) }
     override fun onStop() { ObdManager.setVisible(false); super.onStop() }
@@ -227,7 +206,7 @@ private fun pageTitle(n: Nav): String = when (n.route) {
     "hud" -> "Modo HUD"
     "graphs" -> "Gráficos ao vivo"
     "custom" -> "Sensores personalizados"
-    "license" -> "Minha licença"
+    "updates" -> "Atualizações"
     else -> ""
 }
 
@@ -306,22 +285,14 @@ private fun AppRoot() {
             "hud" -> nav.go("hud")
             "maint" -> nav.go("maint")
             "vehicle" -> nav.go("vehicle")
-            "license" -> nav.go("license")
+            "updates" -> nav.go("updates")
             "demo" -> if (!connected) ObdManager.connect(br.obd.app.link.LinkTarget.DEMO)
         }
     }
     LaunchedEffect(prefs.quickNotif) { br.obd.app.QuickNotif.refresh(context) }
 
-    // licença: a tela de ativação abre sozinha quando precisa (ou quando tentou conectar sem licença)
-    var gate by rememberSaveable { mutableStateOf(false) }
-    val licRequest by br.obd.app.Licensing.showRequest.collectAsState()
-    LaunchedEffect(splash) {
-        if (splash) return@LaunchedEffect
-        br.obd.app.Licensing.refresh()
-        if (licenseShouldPrompt(br.obd.app.Licensing.view.value)) gate = true
-        br.obd.app.Updater.check()
-    }
-    LaunchedEffect(licRequest) { if (licRequest) { gate = true; br.obd.app.Licensing.clearRequest() } }
+    // procura versão nova (no máximo a cada 12 h)
+    LaunchedEffect(splash) { if (!splash) br.obd.app.Updater.check() }
 
     // um teste começou em outra tela: abre a tela dele
     val live by TestRunner.live.collectAsState()
@@ -445,10 +416,6 @@ private fun AppRoot() {
         AnimatedVisibility(!splash && !prefs.onboarded, enter = fadeIn(tween(400)), exit = fadeOut(tween(350))) {
             SetupScreen { connect -> if (connect) nav.go("connect") }
         }
-        AnimatedVisibility(!splash && gate, enter = fadeIn(tween(450)), exit = fadeOut(tween(350))) {
-            BackHandler { gate = false }
-            LicenseGate(app) { gate = false }
-        }
         AnimatedVisibility(splash, enter = fadeIn(), exit = fadeOut(tween(600))) { Splash { splash = false } }
     }
 }
@@ -488,7 +455,7 @@ private fun Page(p: Nav, app: AppActions) {
         "hud" -> HudScreen()
         "graphs" -> GraphsScreen(app)
         "custom" -> CustomPidsScreen()
-        "license" -> LicenseScreen(app)
+        "updates" -> UpdatesScreen()
     }
 }
 
@@ -531,14 +498,7 @@ private fun DrawerContent(app: AppActions, go: (String) -> Unit) {
         MenuRow(Icons.Filled.Terminal, "Terminal", "Comandos AT e OBD") { go("terminal") }
 
         DrawerGroup("App")
-        val lic by br.obd.app.Licensing.view.collectAsState()
-        if (lic.status != br.obd.app.LicStatus.OFF) MenuRow(Icons.Filled.VerifiedUser, "Minha licença", when (lic.status) {
-            br.obd.app.LicStatus.ACTIVE -> "Ativa · ${lic.used} de ${lic.max} aparelhos"
-            br.obd.app.LicStatus.PENDING -> "Ativação pendente · ${br.obd.app.LicenseLogic.formatLeft(lic.leftMs)}"
-            br.obd.app.LicStatus.NONE -> "Demonstração"
-            else -> "Precisa de atenção"
-        }, if (lic.full) Good else Warn) { go("license") }
-        else MenuRow(Icons.Filled.SystemUpdate, "Atualizações", "Versão ${AppInfo.version}") { go("license") }
+        MenuRow(Icons.Filled.SystemUpdate, "Atualizações", "Versão ${AppInfo.version}") { go("updates") }
         MenuRow(Icons.Filled.Palette, "Personalizar", "Temas, painel, alertas, sons") { go("customize") }
         MenuRow(Icons.Filled.Timeline, "Log e exportação", "Para enviar quando algo der errado") { go("log") }
         MenuRow(Icons.Filled.BugReport, "Reportar problema", "Abre um relato no GitHub", Bad) { Support.bug(app) }

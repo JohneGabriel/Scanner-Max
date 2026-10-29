@@ -14,12 +14,6 @@ android {
         targetSdk = 34
         versionCode = 26
         versionName = "1.8"
-
-        // token da ativação (só nas builds do CI; vazio = licença não exigida), guardado embaralhado
-        val tok = System.getenv("SMX_ACT_TOKEN").orEmpty().trim()
-        val key = "ScannerMax".toByteArray()
-        val hex = tok.toByteArray().mapIndexed { i, b -> "%02x".format((b.toInt() xor key[i % key.size].toInt()) and 0xff) }.joinToString("")
-        buildConfigField("String", "ACT_TOKEN_X", "\"$hex\"")
     }
 
     signingConfigs {

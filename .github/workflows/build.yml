@@ -12,8 +12,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      # segredos da licença: sem eles, o APK sai sem exigir ativação (como antes)
-      SMX_ACT_TOKEN: ${{ secrets.SMX_ACT_TOKEN }}
       SMX_KEYSTORE_PASS: ${{ secrets.SMX_KEYSTORE_PASS }}
     steps:
       - uses: actions/checkout@v5

@@ -17,7 +17,6 @@ jobs:
   publicar:
     runs-on: ubuntu-latest
     env:
-      SMX_ACT_TOKEN: ${{ secrets.SMX_ACT_TOKEN }}
       SMX_KEYSTORE_PASS: ${{ secrets.SMX_KEYSTORE_PASS }}
     steps:
       - uses: actions/checkout@v5
@@ -26,8 +25,8 @@ jobs:
           KS: ${{ secrets.SMX_KEYSTORE_B64 }}
           AUT: ${{ secrets.SMX_AUTOMACOES }}
         run: |
-          [ -n "$KS" ] && [ -n "$SMX_KEYSTORE_PASS" ] && [ -n "$SMX_ACT_TOKEN" ] && [ -n "$AUT" ] || {
-            echo "::error::Faltam segredos (SMX_KEYSTORE_B64, SMX_KEYSTORE_PASS, SMX_ACT_TOKEN, SMX_AUTOMACOES). Veja servidor/LEIA-ME.md"; exit 1; }
+          [ -n "$KS" ] && [ -n "$SMX_KEYSTORE_PASS" ] && [ -n "$AUT" ] || {
+            echo "::error::Faltam segredos (SMX_KEYSTORE_B64, SMX_KEYSTORE_PASS, SMX_AUTOMACOES). Veja servidor/LEIA-ME.md"; exit 1; }
           echo "$KS" | base64 -d > "$RUNNER_TEMP/release.jks"
           echo "SMX_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
       - uses: actions/setup-java@v5

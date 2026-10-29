@@ -103,8 +103,7 @@ object Legal {
     )
 
     val PRIVACY = "Política de privacidade" to listOf(
-        "Resumo" to "Tudo fica no seu aparelho. O Scanner Max não cria conta, não usa publicidade e não envia seus dados de uso nem do carro para ninguém.",
-        "Ativação da licença" to "Para ativar a licença (e confirmá-la a cada poucas semanas), o app envia ao servidor de ativação, hospedado no GitHub, apenas o código da licença e um código do aparelho. O código do aparelho é um resumo criptográfico que não revela modelo, número de telefone nem identificadores do sistema. Nada sobre seu carro, viagens ou localização é enviado. Esses códigos servem só para controlar o limite de aparelhos por licença.",
+        "Resumo" to "Tudo fica no seu aparelho. O Scanner Max não tem servidor, não cria conta, não usa publicidade e não envia seus dados para ninguém.",
         "Atualizações" to "O app consulta periodicamente o site do Scanner Max para saber se há versão nova. Essa consulta não envia nenhum dado seu.",
         "O que fica salvo no aparelho" to "Perfis dos veículos (nome, chassi lido da central, cilindrada, combustível, preço), viagens (distância, tempo, consumo estimado e gráficos), resultados de testes, último diagnóstico, lembretes de manutenção, preferências e o log técnico da sessão.",
         "Localização" to "O app não usa GPS. Em Android 11 ou anterior, o sistema exige a permissão de localização para procurar adaptadores Bluetooth LE; ela é usada só para essa busca.",

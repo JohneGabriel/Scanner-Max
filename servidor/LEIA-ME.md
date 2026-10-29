@@ -1,40 +1,29 @@
-# Vendas e licenças do Scanner Max
+# Publicação do Scanner Max
+
+Sem licença: quem tem o link instala e usa. A atualização chega pelo próprio app.
 
 ## Como funciona
-1. **Nova venda** (repositório `scannermax-licencas` → Actions → Nova venda → Run workflow).
-   Gera uma licença assinada e abre uma *issue* com a mensagem pronta para colar no chat do Mercado Livre.
-2. O cliente abre o **link pessoal** (`https://johnegabriel.github.io/scannermax/a/#SMX1...`), baixa o app,
-   instala e abre. O app pega a licença sozinho (área de transferência) ou pelo botão "Ativar no app".
-3. O app pede a ativação ao repositório `scannermax-ativacao`. O workflow confere a assinatura, registra o
-   aparelho (até 3 por licença) e devolve um recibo assinado. O cliente usa o app normalmente desde a
-   primeira abertura; tem 3 dias para a ativação concluir (sem internet, por exemplo).
-4. **Publicar versão** (repositório `Scanner-Max` → Actions): manda o APK para o site; os apps avisam o cliente.
+- O APK fica num link fixo e público:
+  `https://github.com/JohneGabriel/scannermax/releases/download/app/ScannerMax.apk`
+- O app confere `versao.json` (a cada 12 h, e na tela Atualizações) e, se houver versão nova, baixa e entrega ao instalador do Android.
+- **Publicar versão** (repositório `Scanner-Max` → Actions → Publicar versão → Run workflow): compila, assina com a chave definitiva, troca o APK do link e atualiza o `versao.json`. Antes de publicar, aumente `versionCode`/`versionName` em `app/build.gradle.kts`.
 
-## Repositórios
-| Repositório | Visibilidade | Conteúdo |
-|---|---|---|
-| `Scanner-Max` | privado | código do app (este) |
-| `scannermax` | **público** | site (GitHub Pages), APK e `versao.json` — arquivos de `servidor/repos/scannermax` |
-| `scannermax-ativacao` | privado | workflow de ativação + respostas (`l/`) — arquivos de `servidor/repos/scannermax-ativacao` |
-| `scannermax-licencas` | privado | registro de vendas, ferramentas e workflows do vendedor — `servidor/repos/scannermax-licencas` |
+## Mensagem para o comprador
+> Olá! Obrigado pela compra do Scanner Max 🚗🔧
+> Baixe o app pelo link: https://github.com/JohneGabriel/scannermax/releases/download/app/ScannerMax.apk
+> Ao abrir o arquivo, se o Android pedir, permita instalar apps desta fonte. As atualizações chegam pelo próprio app.
+> Qualquer dúvida, é só chamar por aqui!
 
-## Tokens (github.com → Settings → Developer settings → Fine-grained tokens)
-- **Token do app** — repositório: só `scannermax-ativacao`; permissão: *Contents: Read and write*. Vai embutido no app.
-- **Token de automações** — repositórios: `scannermax`, `scannermax-ativacao`, `scannermax-licencas`; permissão: *Contents: Read and write*.
+## Configuração (uma vez)
+1. Crie o repositório **público** `scannermax` e envie os arquivos de `servidor/repos/scannermax` (site + `versao.json`).
+   Em Settings → Pages, publique a partir da branch `main` (pasta raiz) para o site ficar em `https://johnegabriel.github.io/scannermax/`.
+2. Crie um **token** (github.com → Settings → Developer settings → Fine-grained tokens): repositório só `scannermax`, permissão *Contents: Read and write*, maior validade possível.
+3. No repositório `Scanner-Max` → Settings → Secrets and variables → Actions, crie:
+   | Segredo | Valor |
+   |---|---|
+   | `SMX_KEYSTORE_B64` | conteúdo de `scannermax-release.jks.b64` |
+   | `SMX_KEYSTORE_PASS` | conteúdo de `senha.txt` |
+   | `SMX_AUTOMACOES` | o token do passo 2 |
 
-Escolha a maior validade possível e anote a data: antes de vencer, gere outro, troque o segredo e publique uma versão.
-
-## Segredos (Settings → Secrets and variables → Actions → New repository secret)
-| Repositório | Segredo | Valor |
-|---|---|---|
-| Scanner-Max | `SMX_KEYSTORE_B64` | conteúdo de `scannermax-release.jks.b64` |
-| Scanner-Max | `SMX_KEYSTORE_PASS` | senha da chave |
-| Scanner-Max | `SMX_ACT_TOKEN` | token do app |
-| Scanner-Max | `SMX_AUTOMACOES` | token de automações |
-| scannermax-ativacao | `LICENSE_KEY` | conteúdo de `licenca-privada.pem` |
-| scannermax-ativacao | `SMX_AUTOMACOES` | token de automações |
-| scannermax-licencas | `LICENSE_KEY` | conteúdo de `licenca-privada.pem` |
-
-## Guarde em lugar seguro (fora do GitHub também)
-- `scannermax-release.jks` + senha: sem ela não dá para atualizar o app instalado nos clientes.
-- `licenca-privada.pem`: quem tiver este arquivo consegue gerar licenças.
+## Guarde em lugar seguro (fora do GitHub)
+`scannermax-release.jks` + senha. Sem eles, não dá para atualizar o app que já está instalado nos clientes.

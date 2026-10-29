@@ -227,11 +227,6 @@ object ObdManager {
 
     fun connect(target: LinkTarget) = scope.launch {
         if (_status.value.startsWith("Conectando")) return@launch
-        // sem licença ativa: só a demonstração
-        if (target.kind != LinkKind.DEMO && !Licensing.allowReal()) {
-            _status.value = "Ative sua licença para conectar ao carro"
-            return@launch
-        }
         if (target.kind == LinkKind.DEMO) beforeDemo = Garage.current.value?.id?.takeIf { !it.startsWith("SMXDEMO") }
         userDisconnected = false
         misses.clear(); _unavailable.value = emptySet()

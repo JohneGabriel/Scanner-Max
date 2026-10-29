@@ -19,6 +19,13 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 
+/** Onde o app é publicado (repositório público do site). */
+object Repos {
+    const val OWNER = "JohneGabriel"
+    const val SITE = "scannermax"
+    const val SITE_URL = "https://johnegabriel.github.io/scannermax/"
+}
+
 /** Versão publicada no site (arquivo `versao.json`). */
 data class Release(val code: Int, val name: String, val notes: String, val url: String)
 
