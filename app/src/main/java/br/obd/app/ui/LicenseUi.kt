@@ -184,7 +184,7 @@ private fun look(v: LicView, phase: ActPhase): Look {
         LicStatus.INVALID -> Look(Bad, Icons.Filled.ErrorOutline, "Licença inválida",
             "Este arquivo de instalação foi modificado. Instale de novo pelo link que você recebeu na compra.")
         LicStatus.NONE -> Look(Cyan, null, "Versão de demonstração",
-            "Esta cópia não tem licença: dá para explorar tudo com um carro simulado. Já comprou? Abra o link pessoal que você recebeu e toque em "Ativar no app".")
+            "Esta cópia não tem licença: dá para explorar tudo com um carro simulado. Já comprou? Abra o link pessoal que você recebeu e toque em \"Ativar no app\".")
     }
 }
 
