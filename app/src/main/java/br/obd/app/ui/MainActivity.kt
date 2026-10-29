@@ -151,8 +151,8 @@ class MainActivity : ComponentActivity() {
     }
 
 
-    override fun onStart() { super.onStart(); ObdManager.setVisible(true) }
-    override fun onStop() { ObdManager.setVisible(false); super.onStop() }
+    override fun onStart() { super.onStart(); ObdManager.setVisible(true); br.obd.app.Updater.foreground = true }
+    override fun onStop() { ObdManager.setVisible(false); br.obd.app.Updater.foreground = false; super.onStop() }
 }
 
 /** Tela pedida por um atalho do ícone ou por uma notificação. */
@@ -293,6 +293,14 @@ private fun AppRoot() {
 
     // procura versão nova (no máximo a cada 12 h)
     LaunchedEffect(splash) { if (!splash) br.obd.app.Updater.check() }
+    // versão nova já baixada: instala ao abrir, antes de conectar (o app reabre sozinho na versão nova)
+    val upd by br.obd.app.Updater.state.collectAsState()
+    var autoInstalled by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(upd, splash) {
+        if (splash || autoInstalled || upd !is br.obd.app.UpdState.Ready) return@LaunchedEffect
+        delay(600)
+        if (br.obd.app.Updater.safeNow() && br.obd.app.Updater.canInstall()) { autoInstalled = true; br.obd.app.Updater.install() }
+    }
 
     // um teste começou em outra tela: abre a tela dele
     val live by TestRunner.live.collectAsState()

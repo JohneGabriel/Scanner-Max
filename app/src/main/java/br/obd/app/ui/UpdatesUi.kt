@@ -61,7 +61,8 @@ fun UpdatesScreen() {
                 UpdState.Idle -> OutlinedButton(onClick = { Updater.check(true) }, Modifier.fillMaxWidth()) { BtnLabel("Procurar atualização") }
             }
         }
-        Callout("O app confere sozinho se há versão nova e avisa você. A atualização mantém seus carros, viagens e configurações.", Tone.INFO)
+        Callout("As atualizações são automáticas: no Wi-Fi o app baixa a versão nova sozinho e instala quando estiver fechado. " +
+            "Seus carros, viagens e configurações continuam. Em alguns celulares o Android pede um toque em \"Instalar\".", Tone.INFO)
         Spacer(Modifier.height(20.dp))
     }
 }
@@ -79,9 +80,11 @@ private fun UpdateBody(st: UpdState) {
             LinearProgressIndicator(progress = { st.frac }, modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)), drawStopIndicator = {})
         }
         is UpdState.Ready -> {
-            Text("Versão ${st.r.name} pronta para instalar", style = MaterialTheme.typography.titleSmall, color = Good)
-            if (!Updater.canInstall()) Hint("O Android vai pedir para permitir que o Scanner Max instale atualizações. Ative a opção e volte.")
-            Button(onClick = { Updater.install() }, Modifier.fillMaxWidth().height(50.dp)) { BtnLabel("Instalar") }
+            Text("Versão ${st.r.name} pronta", style = MaterialTheme.typography.titleSmall, color = Good)
+            if (st.r.notes.isNotBlank()) Hint(st.r.notes)
+            if (!Updater.canInstall()) Hint("Falta só uma permissão: o Android vai pedir para deixar o Scanner Max instalar as próprias atualizações. Ative e volte; depois disso elas entram sozinhas.")
+            else Hint("Ela é instalada sozinha com o app fechado e sem carro conectado, ou na próxima vez que você abrir o app.")
+            Button(onClick = { Updater.install() }, Modifier.fillMaxWidth().height(50.dp)) { BtnLabel("Instalar agora") }
         }
         else -> Unit
     }
@@ -92,7 +95,22 @@ private fun UpdateBody(st: UpdState) {
 fun UpdateBanner(modifier: Modifier = Modifier) {
     val s by Updater.state.collectAsState()
     val dismissed by Updater.dismissed.collectAsState()
-    val show = !dismissed && (s is UpdState.Available || s is UpdState.Downloading || s is UpdState.Ready)
+    val updated by Updater.justUpdated.collectAsState()
+    // acabou de atualizar: aviso curto
+    AnimatedVisibility(updated != null, modifier, enter = fadeIn() + slideInVertically { it }, exit = fadeOut() + slideOutVertically { it }) {
+        Row(
+            Modifier.padding(horizontal = 12.dp).widthIn(max = 520.dp).fillMaxWidth().clip(RoundedCornerShape(22.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(start = 16.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconBadge(Icons.Filled.SystemUpdate, Good, 32)
+            Spacer(Modifier.width(12.dp))
+            Text("Scanner Max atualizado para ${updated ?: ""}", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            TextButton(onClick = { Updater.justUpdated.value = null }) { Text("Ok") }
+        }
+    }
+    // só aparece quando a instalação automática não pôde acontecer (ex.: carro conectado, falta permissão)
+    val show = updated == null && !dismissed && s is UpdState.Ready
     AnimatedVisibility(show, modifier, enter = fadeIn() + slideInVertically { it }, exit = fadeOut() + slideOutVertically { it }) {
         Column(
             Modifier.padding(horizontal = 12.dp).widthIn(max = 520.dp).fillMaxWidth().clip(RoundedCornerShape(22.dp))
@@ -103,7 +121,7 @@ fun UpdateBanner(modifier: Modifier = Modifier) {
                 IconBadge(Icons.Filled.SystemUpdate, Accent, 36)
                 Spacer(Modifier.width(12.dp))
                 Text("Nova versão do Scanner Max", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                if (s is UpdState.Available) TextButton(onClick = { Updater.dismissed.value = true }) { Text("Depois") }
+                TextButton(onClick = { Updater.dismissed.value = true }) { Text("Depois") }
             }
             UpdateBody(s)
         }

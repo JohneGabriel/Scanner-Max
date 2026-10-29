@@ -8,6 +8,7 @@ class ObdApplication : Application() {
         ObdManager.init(this)
         Updater.init(this)
         runCatching { ReminderWorker.schedule(this) }
+        runCatching { Updater.schedule(this) }
         QuickNotif.refresh(this)
     }
 }
