@@ -65,6 +65,7 @@ object VagManager {
     /** Abre o cabo e acorda a central no endereço indicado (01 = motor). */
     fun connect(address: Int) = scope.launch {
         if (_busy.value != null) return@launch
+        if (!Licensing.allowReal()) { _status.value = "Ative sua licença para usar o cabo"; return@launch }
         _busy.value = "Conectando ao endereço %02X…".format(address)
         try {
             disconnectNow()

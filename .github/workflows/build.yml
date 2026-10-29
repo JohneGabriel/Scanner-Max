@@ -11,8 +11,24 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # segredos da licença: sem eles, o APK sai sem exigir ativação (como antes)
+      SMX_ACT_TOKEN: ${{ secrets.SMX_ACT_TOKEN }}
+      SMX_KEYSTORE_PASS: ${{ secrets.SMX_KEYSTORE_PASS }}
     steps:
       - uses: actions/checkout@v5
+
+      - name: Chave de assinatura definitiva
+        env:
+          KS: ${{ secrets.SMX_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KS" ]; then
+            echo "$KS" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "SMX_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+            echo "Assinando com a chave definitiva"
+          else
+            echo "::warning::SMX_KEYSTORE_B64 não configurado: usando a chave de testes"
+          fi
 
       - uses: actions/setup-java@v5
         with:

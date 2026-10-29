@@ -12,8 +12,14 @@ android {
         applicationId = "br.obd.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 25
-        versionName = "1.7"
+        versionCode = 26
+        versionName = "1.8"
+
+        // token da ativação (só nas builds do CI; vazio = licença não exigida), guardado embaralhado
+        val tok = System.getenv("SMX_ACT_TOKEN").orEmpty().trim()
+        val key = "ScannerMax".toByteArray()
+        val hex = tok.toByteArray().mapIndexed { i, b -> "%02x".format((b.toInt() xor key[i % key.size].toInt()) and 0xff) }.joinToString("")
+        buildConfigField("String", "ACT_TOKEN_X", "\"$hex\"")
     }
 
     signingConfigs {
@@ -25,6 +31,14 @@ android {
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
+        // chave definitiva (só existe no CI, vinda dos segredos do GitHub)
+        val ks = System.getenv("SMX_KEYSTORE")
+        if (!ks.isNullOrBlank() && file(ks).exists()) create("release") {
+            storeFile = file(ks)
+            storePassword = System.getenv("SMX_KEYSTORE_PASS")
+            keyAlias = "scannermax"
+            keyPassword = System.getenv("SMX_KEYSTORE_PASS")
+        }
     }
 
     buildTypes {
@@ -33,13 +47,14 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // mesma chave do debug: instala por cima das versões anteriores
-            signingConfig = signingConfigs.getByName("debug")
+            // chave definitiva quando disponível; senão a de testes (builds locais)
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     compileOptions {

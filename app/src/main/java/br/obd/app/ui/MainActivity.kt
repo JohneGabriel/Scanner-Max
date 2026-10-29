@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -63,6 +64,8 @@ import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Usb
+import androidx.compose.material.icons.filled.VerifiedUser
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -202,6 +205,7 @@ private fun pageTitle(n: Nav): String = when (n.route) {
     "hud" -> "Modo HUD"
     "graphs" -> "Gráficos ao vivo"
     "custom" -> "Sensores personalizados"
+    "license" -> "Minha licença"
     else -> ""
 }
 
@@ -284,6 +288,17 @@ private fun AppRoot() {
         }
     }
     LaunchedEffect(prefs.quickNotif) { br.obd.app.QuickNotif.refresh(context) }
+
+    // licença: a tela de ativação abre sozinha quando precisa (ou quando tentou conectar sem licença)
+    var gate by rememberSaveable { mutableStateOf(false) }
+    val licRequest by br.obd.app.Licensing.showRequest.collectAsState()
+    LaunchedEffect(splash) {
+        if (splash) return@LaunchedEffect
+        br.obd.app.Licensing.refresh()
+        if (licenseShouldPrompt(br.obd.app.Licensing.view.value)) gate = true
+        br.obd.app.Updater.check()
+    }
+    LaunchedEffect(licRequest) { if (licRequest) { gate = true; br.obd.app.Licensing.clearRequest() } }
 
     // um teste começou em outra tela: abre a tela dele
     val live by TestRunner.live.collectAsState()
@@ -403,8 +418,13 @@ private fun AppRoot() {
             }
         }
 
+        if (nav.stack.isEmpty()) UpdateBanner(Modifier.align(Alignment.BottomCenter).padding(bottom = 96.dp).navigationBarsPadding())
         AnimatedVisibility(!splash && !prefs.onboarded, enter = fadeIn(tween(400)), exit = fadeOut(tween(350))) {
             SetupScreen { connect -> if (connect) nav.go("connect") }
+        }
+        AnimatedVisibility(!splash && gate, enter = fadeIn(tween(450)), exit = fadeOut(tween(350))) {
+            BackHandler { gate = false }
+            LicenseGate(app) { gate = false }
         }
         AnimatedVisibility(splash, enter = fadeIn(), exit = fadeOut(tween(600))) { Splash { splash = false } }
     }
@@ -445,6 +465,7 @@ private fun Page(p: Nav, app: AppActions) {
         "hud" -> HudScreen()
         "graphs" -> GraphsScreen(app)
         "custom" -> CustomPidsScreen()
+        "license" -> LicenseScreen(app)
     }
 }
 
@@ -487,6 +508,14 @@ private fun DrawerContent(app: AppActions, go: (String) -> Unit) {
         MenuRow(Icons.Filled.Terminal, "Terminal", "Comandos AT e OBD") { go("terminal") }
 
         DrawerGroup("App")
+        val lic by br.obd.app.Licensing.view.collectAsState()
+        if (lic.status != br.obd.app.LicStatus.OFF) MenuRow(Icons.Filled.VerifiedUser, "Minha licença", when (lic.status) {
+            br.obd.app.LicStatus.ACTIVE -> "Ativa · ${lic.used} de ${lic.max} aparelhos"
+            br.obd.app.LicStatus.PENDING -> "Ativação pendente · ${br.obd.app.LicenseLogic.formatLeft(lic.leftMs)}"
+            br.obd.app.LicStatus.NONE -> "Demonstração"
+            else -> "Precisa de atenção"
+        }, if (lic.full) Good else Warn) { go("license") }
+        else MenuRow(Icons.Filled.SystemUpdate, "Atualizações", "Versão ${AppInfo.version}") { go("license") }
         MenuRow(Icons.Filled.Palette, "Personalizar", "Temas, painel, alertas, sons") { go("customize") }
         MenuRow(Icons.Filled.Timeline, "Log e exportação", "Para enviar quando algo der errado") { go("log") }
         MenuRow(Icons.Filled.BugReport, "Reportar problema", "Abre um relato no GitHub", Bad) { Support.bug(app) }

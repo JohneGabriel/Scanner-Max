@@ -6,6 +6,8 @@ class ObdApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         ObdManager.init(this)
+        Licensing.init(this)
+        Updater.init(this)
         runCatching { ReminderWorker.schedule(this) }
         QuickNotif.refresh(this)
     }
