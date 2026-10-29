@@ -1,8 +1,7 @@
 name: Estabilidade
 
+# roda só quando pedido (Actions → Estabilidade → Run workflow): o emulador gasta muitos minutos
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
